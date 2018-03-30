@@ -2,7 +2,7 @@ test simple-gvn
 
 target x86_64
 
-function %eliminate_redundant_global_loads(i32, i64 vmctx) {
+function @eliminate_redundant_global_loads(i32, i64 vmctx) {
     gv0 = vmctx
     gv1 = load.i64 notrap aligned readonly gv0
     heap0 = static gv1, min 0x1_0000, bound 0x1_0000_0000, guard 0x8000_0000, index_type i32

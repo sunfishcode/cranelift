@@ -378,7 +378,7 @@ impl<'a> RelocSink for FaerieRelocSink<'a> {
         addend: Addend,
     ) {
         let ref_name: String = match *name {
-            ir::ExternalName::User { .. } => {
+            ir::ExternalName::Index { .. } => {
                 if self.namespace.is_function(name) {
                     self.namespace.get_function_decl(name).name.clone()
                 } else {

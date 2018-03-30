@@ -3,7 +3,7 @@ target riscv32
 
 ; Ensure that instructions emitted by LICM get encodings.
 
-function %simple_loop(i32) -> i32 {
+function @simple_loop(i32) -> i32 {
             ebb0(v0: i32):
 [UJ#1b]       jump ebb1(v0)
 

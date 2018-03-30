@@ -196,7 +196,7 @@ Coalescing algorithm
 Unconstrained SSA form is not well suited to register allocation because of the problems
 that can arise around EBB parameters and arguments. Consider this simple example::
 
-    function %interference(i32, i32) -> i32 {
+    function @interference(i32, i32) -> i32 {
     ebb0(v0: i32, v1: i32):
         brz v0, ebb1(v1)
         jump ebb1(v0)
@@ -214,7 +214,7 @@ between ``v1`` and ``v2`` in the ``ebb1`` block.
 
 The interference can be resolved by isolating the SSA values passed as EBB arguments::
 
-    function %coalesced(i32, i32) -> i32 {
+    function @coalesced(i32, i32) -> i32 {
     ebb0(v0: i32, v1: i32):
         v5 = copy v1
         brz v0, ebb1(v5)

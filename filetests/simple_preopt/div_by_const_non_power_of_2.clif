@@ -4,7 +4,7 @@ target i686 baseline
 ; -------- U32 --------
 
 ; complex case (mul, sub, shift, add, shift)
-function %t_udiv32_p7(i32) -> i32 {
+function @t_udiv32_p7(i32) -> i32 {
 ebb0(v0: i32):
     v1 = udiv_imm v0, 7
     ; check: iconst.i32 0x2492_4925
@@ -18,7 +18,7 @@ ebb0(v0: i32):
 }
 
 ; simple case (mul, shift)
-function %t_udiv32_p125(i32) -> i32 {
+function @t_udiv32_p125(i32) -> i32 {
 ebb0(v0: i32):
     v1 = udiv_imm v0, 125
     ; check: iconst.i32 0x1062_4dd3
@@ -29,7 +29,7 @@ ebb0(v0: i32):
 }
 
 ; simple case w/ shift by zero (mul)
-function %t_udiv32_p641(i32) -> i32 {
+function @t_udiv32_p641(i32) -> i32 {
 ebb0(v0: i32):
     v1 = udiv_imm v0, 641
     ; check: iconst.i32 0x0066_3d81
@@ -42,7 +42,7 @@ ebb0(v0: i32):
 ; -------- S32 --------
 
 ; simple case w/ shift by zero (mul, add-sign-bit)
-function %t_sdiv32_n6(i32) -> i32 {
+function @t_sdiv32_n6(i32) -> i32 {
 ebb0(v0: i32):
     v1 = sdiv_imm v0, -6
     ; check: iconst.i32 0xffff_ffff_d555_5555
@@ -54,7 +54,7 @@ ebb0(v0: i32):
 }
 
 ; simple case (mul, shift, add-sign-bit)
-function %t_sdiv32_n5(i32) -> i32 {
+function @t_sdiv32_n5(i32) -> i32 {
 ebb0(v0: i32):
     v1 = sdiv_imm v0, -5
     ; check: iconst.i32 0xffff_ffff_9999_9999
@@ -67,7 +67,7 @@ ebb0(v0: i32):
 }
 
 ; case d < 0 && M > 0 (mul, sub, shift, add-sign-bit)
-function %t_sdiv32_n3(i32) -> i32 {
+function @t_sdiv32_n3(i32) -> i32 {
 ebb0(v0: i32):
     v1 = sdiv_imm v0, -3
     ; check: iconst.i32 0x5555_5555
@@ -81,7 +81,7 @@ ebb0(v0: i32):
 }
 
 ; simple case w/ shift by zero (mul, add-sign-bit)
-function %t_sdiv32_p6(i32) -> i32 {
+function @t_sdiv32_p6(i32) -> i32 {
 ebb0(v0: i32):
     v1 = sdiv_imm v0, 6
     ; check: iconst.i32 0x2aaa_aaab
@@ -93,7 +93,7 @@ ebb0(v0: i32):
 }
 
 ; case d > 0 && M < 0 (mull, add, shift, add-sign-bit)
-function %t_sdiv32_p7(i32) -> i32 {
+function @t_sdiv32_p7(i32) -> i32 {
 ebb0(v0: i32):
     v1 = sdiv_imm v0, 7
     ; check: iconst.i32 0xffff_ffff_9249_2493
@@ -107,7 +107,7 @@ ebb0(v0: i32):
 }
 
 ; simple case (mul, shift, add-sign-bit)
-function %t_sdiv32_p625(i32) -> i32 {
+function @t_sdiv32_p625(i32) -> i32 {
 ebb0(v0: i32):
     v1 = sdiv_imm v0, 625
     ; check: iconst.i32 0x68db_8bad
@@ -123,7 +123,7 @@ ebb0(v0: i32):
 ; -------- U64 --------
 
 ; complex case (mul, sub, shift, add, shift)
-function %t_udiv64_p7(i64) -> i64 {
+function @t_udiv64_p7(i64) -> i64 {
 ebb0(v0: i64):
     v1 = udiv_imm v0, 7
     ; check: iconst.i64 0x2492_4924_9249_2493
@@ -137,7 +137,7 @@ ebb0(v0: i64):
 }
 
 ; simple case (mul, shift)
-function %t_udiv64_p9(i64) -> i64 {
+function @t_udiv64_p9(i64) -> i64 {
 ebb0(v0: i64):
     v1 = udiv_imm v0, 9
     ; check: iconst.i64 0xe38e_38e3_8e38_e38f
@@ -148,7 +148,7 @@ ebb0(v0: i64):
 }
 
 ; complex case (mul, sub, shift, add, shift)
-function %t_udiv64_p125(i64) -> i64 {
+function @t_udiv64_p125(i64) -> i64 {
 ebb0(v0: i64):
     v1 = udiv_imm v0, 125
     ; check: iconst.i64 0x0624_dd2f_1a9f_be77
@@ -162,7 +162,7 @@ ebb0(v0: i64):
 }
 
 ; simple case w/ shift by zero (mul)
-function %t_udiv64_p274177(i64) -> i64 {
+function @t_udiv64_p274177(i64) -> i64 {
 ebb0(v0: i64):
     v1 = udiv_imm v0, 274177
     ; check: iconst.i64 0x3d30_f19c_d101
@@ -175,7 +175,7 @@ ebb0(v0: i64):
 ; -------- S64 --------
 
 ; simple case (mul, shift, add-sign-bit)
-function %t_sdiv64_n625(i64) -> i64 {
+function @t_sdiv64_n625(i64) -> i64 {
 ebb0(v0: i64):
     v1 = sdiv_imm v0, -625
     ; check: iconst.i64 0xcb92_3a29_c779_a6b5
@@ -188,7 +188,7 @@ ebb0(v0: i64):
 }
 
 ; simple case w/ zero shift (mul, add-sign-bit)
-function %t_sdiv64_n6(i64) -> i64 {
+function @t_sdiv64_n6(i64) -> i64 {
 ebb0(v0: i64):
     v1 = sdiv_imm v0, -6
     ; check: iconst.i64 0xd555_5555_5555_5555
@@ -200,7 +200,7 @@ ebb0(v0: i64):
 }
 
 ; simple case w/ zero shift (mul, add-sign-bit)
-function %t_sdiv64_n5(i64) -> i64 {
+function @t_sdiv64_n5(i64) -> i64 {
 ebb0(v0: i64):
     v1 = sdiv_imm v0, -5
     ; check: iconst.i64 0x9999_9999_9999_9999
@@ -213,7 +213,7 @@ ebb0(v0: i64):
 }
 
 ; case d < 0 && M > 0 (mul, sub, shift, add-sign-bit)
-function %t_sdiv64_n3(i64) -> i64 {
+function @t_sdiv64_n3(i64) -> i64 {
 ebb0(v0: i64):
     v1 = sdiv_imm v0, -3
     ; check: iconst.i64 0x5555_5555_5555_5555
@@ -227,7 +227,7 @@ ebb0(v0: i64):
 }
 
 ; simple case w/ zero shift (mul, add-sign-bit)
-function %t_sdiv64_p6(i64) -> i64 {
+function @t_sdiv64_p6(i64) -> i64 {
 ebb0(v0: i64):
     v1 = sdiv_imm v0, 6
     ; check: iconst.i64 0x2aaa_aaaa_aaaa_aaab
@@ -239,7 +239,7 @@ ebb0(v0: i64):
 }
 
 ; case d > 0 && M < 0 (mul, add, shift, add-sign-bit)
-function %t_sdiv64_p15(i64) -> i64 {
+function @t_sdiv64_p15(i64) -> i64 {
 ebb0(v0: i64):
     v1 = sdiv_imm v0, 15
     ; check: iconst.i64 0x8888_8888_8888_8889
@@ -253,7 +253,7 @@ ebb0(v0: i64):
 }
 
 ; simple case (mul, shift, add-sign-bit)
-function %t_sdiv64_p625(i64) -> i64 {
+function @t_sdiv64_p625(i64) -> i64 {
 ebb0(v0: i64):
     v1 = sdiv_imm v0, 625
     ; check: iconst.i64 0x346d_c5d6_3886_594b

@@ -1,7 +1,7 @@
 test verifier
 
-function %gcd(i32 uext, i32 uext) -> i32 uext system_v {
-    fn0 = %divmod(i32 uext, i32 uext) -> i32 uext, i32 uext
+function @gcd(i32 uext, i32 uext) -> i32 uext system_v {
+    fn0 = @divmod(i32 uext, i32 uext) -> i32 uext, i32 uext
 
 ebb1(v0: i32, v1: i32):
     brz v1, ebb2

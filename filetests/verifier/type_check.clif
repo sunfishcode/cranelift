@@ -1,39 +1,39 @@
 test verifier
 
-function %entry_block_signature_mismatch(i32) {
+function @entry_block_signature_mismatch(i32) {
     ebb0: ; error: entry block parameters (0) must match function signature (1)
         return
 }
 
-function %entry_block_arg_type(i32) {
+function @entry_block_arg_type(i32) {
     ebb0(v0: f32): ; error: entry block parameter 0 expected to have type i32, got f32
         return
 }
 
-function %incorrect_arg_type(i32, b1) -> i32 {
+function @incorrect_arg_type(i32, b1) -> i32 {
     ebb0(v0: i32, v1: b1):
         v2 = iadd v0, v1 ; error: arg 1 (v1) has type b1, expected i32
         return v2
 }
 
-function %incorrect_return_type() -> f32 {
+function @incorrect_return_type() -> f32 {
     ebb0:
         v0 = iconst.i32 1
         return v0 ; error: arg 0 (v0) has type i32, must match function signature of f32
 }
 
-function %too_many_return_values() {
+function @too_many_return_values() {
     ebb0:
         v0 = iconst.i32 1
         return v0 ; error: arguments of return must match function signature
 }
 
-function %too_few_return_values() -> f32, i64 {
+function @too_few_return_values() -> f32, i64 {
     ebb0:
         return ; error: arguments of return must match function signature
 }
 
-function %type_mismatch_controlling_variable() {
+function @type_mismatch_controlling_variable() {
     ebb0:
         v0 = iconst.i32 5
         v1 = iconst.i64 6
@@ -41,15 +41,15 @@ function %type_mismatch_controlling_variable() {
         return
 }
 
-function %fn_call_too_few_args() {
-    fn2 = %great_fn(i32, f32)
+function @fn_call_too_few_args() {
+    fn2 = @great_fn(i32, f32)
     ebb0:
         call fn2() ; error: mismatched argument count for `call fn2()`: got 0, expected 2
         return
 }
 
-function %fn_call_too_many_args() {
-    fn5 = %best_fn()
+function @fn_call_too_many_args() {
+    fn5 = @best_fn()
     ebb0:
         v0 = iconst.i64 56
         v1 = f32const 0.0
@@ -57,7 +57,7 @@ function %fn_call_too_many_args() {
         return
 }
 
-function %fn_call_incorrect_arg_type(i64) {
+function @fn_call_incorrect_arg_type(i64) {
     sig9 = (f32)
     ebb0(v0: i64):
         v1 = iconst.i32 56
@@ -67,7 +67,7 @@ function %fn_call_incorrect_arg_type(i64) {
 
 ; TODO: Should we instead just verify that jump tables contain no EBBs that take arguments? This
 ; error doesn't occur if no instruction uses the jump table.
-function %jump_table_args() {
+function @jump_table_args() {
     jt1 = jump_table [ebb1]
     ebb0:
         v0 = iconst.i32 0
@@ -79,7 +79,7 @@ function %jump_table_args() {
         return
 }
 
-function %jump_args() {
+function @jump_args() {
     ebb0:
         v0 = iconst.i16 10
         v3 = iconst.i64 20
@@ -89,7 +89,7 @@ function %jump_args() {
         return
 }
 
-function %jump_args2() {
+function @jump_args2() {
     ebb0:
         v0 = iconst.i16 10
         v3 = iconst.i64 20
@@ -100,14 +100,14 @@ function %jump_args2() {
         return
 }
 
-function %bad_extend() {
+function @bad_extend() {
 ebb0:
     v0 = iconst.i32 10
     v1 = uextend.i16 v0 ; error: input i32 must be smaller than output i16
     return
 }
 
-function %bad_reduce() {
+function @bad_reduce() {
 ebb0:
     v0 = iconst.i32 10
     v1 = ireduce.i64 v0 ; error: input i32 must be larger than output i64

@@ -1,7 +1,7 @@
 test regalloc
 target x86_64 haswell
 
-function %foo() system_v {
+function @foo() system_v {
 ebb4:
     v3 = iconst.i32 0
     jump ebb3

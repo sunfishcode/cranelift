@@ -9,7 +9,7 @@ target x86_64
 ;   sed -ne 's/^ *; asm: *//p' filetests/isa/x86/shrink.clif | llvm-mc -show-encoding -triple=x86_64
 ;
 
-function %test_shrinking(i32) -> i32 {
+function @test_shrinking(i32) -> i32 {
 ebb0(v0: i32 [ %rdi ]):
            ; asm: movl $0x2,%eax
 [-,%rcx]   v1 = iconst.i32 2     ; bin: b9 00000002
@@ -18,7 +18,7 @@ ebb0(v0: i32 [ %rdi ]):
            return v2
 }
 
-function %test_not_shrinking(i32) -> i32 {
+function @test_not_shrinking(i32) -> i32 {
 ebb0(v0: i32 [ %r8 ]):
            ; asm: movl $0x2,%eax
 [-,%rcx]   v1 = iconst.i32 2     ; bin: b9 00000002

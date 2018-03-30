@@ -13,19 +13,19 @@ mod tests {
     #[test]
     fn unit_encodings() {
         // The encoding of integer registers is not alphabetical.
-        assert_eq!(INFO.parse_regunit("rax"), Some(0));
-        assert_eq!(INFO.parse_regunit("rbx"), Some(3));
-        assert_eq!(INFO.parse_regunit("rcx"), Some(1));
-        assert_eq!(INFO.parse_regunit("rdx"), Some(2));
-        assert_eq!(INFO.parse_regunit("rsi"), Some(6));
-        assert_eq!(INFO.parse_regunit("rdi"), Some(7));
-        assert_eq!(INFO.parse_regunit("rbp"), Some(5));
-        assert_eq!(INFO.parse_regunit("rsp"), Some(4));
-        assert_eq!(INFO.parse_regunit("r8"), Some(8));
-        assert_eq!(INFO.parse_regunit("r15"), Some(15));
+        assert_eq!(INFO.parse_regunit("%rax"), Some(0));
+        assert_eq!(INFO.parse_regunit("%rbx"), Some(3));
+        assert_eq!(INFO.parse_regunit("%rcx"), Some(1));
+        assert_eq!(INFO.parse_regunit("%rdx"), Some(2));
+        assert_eq!(INFO.parse_regunit("%rsi"), Some(6));
+        assert_eq!(INFO.parse_regunit("%rdi"), Some(7));
+        assert_eq!(INFO.parse_regunit("%rbp"), Some(5));
+        assert_eq!(INFO.parse_regunit("%rsp"), Some(4));
+        assert_eq!(INFO.parse_regunit("%r8"), Some(8));
+        assert_eq!(INFO.parse_regunit("%r15"), Some(15));
 
-        assert_eq!(INFO.parse_regunit("xmm0"), Some(16));
-        assert_eq!(INFO.parse_regunit("xmm15"), Some(31));
+        assert_eq!(INFO.parse_regunit("%xmm0"), Some(16));
+        assert_eq!(INFO.parse_regunit("%xmm15"), Some(31));
     }
 
     #[test]

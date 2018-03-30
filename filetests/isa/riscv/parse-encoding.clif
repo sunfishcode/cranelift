@@ -2,8 +2,8 @@
 test legalizer
 target riscv32
 
-function %parse_encoding(i32 [%x5]) -> i32 [%x10] {
-    ; check: function %parse_encoding(i32 [%x5], i32 link [%x1]) -> i32 [%x10], i32 link [%x1] fast {
+function @parse_encoding(i32 [%x5]) -> i32 [%x10] {
+    ; check: function @parse_encoding(i32 [%x5], i32 link [%x1]) -> i32 [%x10], i32 link [%x1] fast {
 
     sig0 = (i32 [%x10]) -> i32 [%x10] system_v
     ; check: sig0 = (i32 [%x10]) -> i32 [%x10] system_v
@@ -27,9 +27,9 @@ function %parse_encoding(i32 [%x5]) -> i32 [%x10] {
     ; check: sig5 = () -> f32 [0] system_v
 
     ; function + signature
-    fn0 = %bar(i32 [%x10]) -> b1 [%x10] system_v
+    fn0 = @bar(i32 [%x10]) -> b1 [%x10] system_v
     ; check: sig6 = (i32 [%x10]) -> b1 [%x10] system_v
-    ; nextln: fn0 = %bar sig6
+    ; nextln: fn0 = @bar sig6
 
 ebb0(v0: i32):
     return v0

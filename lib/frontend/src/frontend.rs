@@ -832,7 +832,7 @@ mod tests {
         sig.params.push(AbiParam::new(I32));
 
         let mut fn_ctx = FunctionBuilderContext::new();
-        let mut func = Function::with_name_signature(ExternalName::testcase("sample"), sig);
+        let mut func = Function::with_name_signature(ExternalName::clone_from_str("sample"), sig);
         {
             let mut builder = FunctionBuilder::new(&mut func, &mut fn_ctx);
 
@@ -948,7 +948,7 @@ mod tests {
         sig.returns.push(AbiParam::new(I32));
 
         let mut fn_ctx = FunctionBuilderContext::new();
-        let mut func = Function::with_name_signature(ExternalName::testcase("sample"), sig);
+        let mut func = Function::with_name_signature(ExternalName::clone_from_str("sample"), sig);
         {
             let mut builder = FunctionBuilder::new(&mut func, &mut fn_ctx);
 
@@ -974,9 +974,9 @@ mod tests {
 
         assert_eq!(
             func.display(None).to_string(),
-            "function %sample() -> i32 system_v {
+            "function @sample() -> i32 system_v {
     sig0 = (i32, i32, i32) system_v
-    fn0 = %Memcpy sig0
+    fn0 = @<Memcpy> sig0
 
 ebb0:
     v3 = iconst.i32 0
@@ -1009,7 +1009,7 @@ ebb0:
         sig.returns.push(AbiParam::new(I32));
 
         let mut fn_ctx = FunctionBuilderContext::new();
-        let mut func = Function::with_name_signature(ExternalName::testcase("sample"), sig);
+        let mut func = Function::with_name_signature(ExternalName::clone_from_str("sample"), sig);
         {
             let mut builder = FunctionBuilder::new(&mut func, &mut fn_ctx);
 
@@ -1033,7 +1033,7 @@ ebb0:
 
         assert_eq!(
             func.display(None).to_string(),
-            "function %sample() -> i32 system_v {
+            "function @sample() -> i32 system_v {
 ebb0:
     v4 = iconst.i32 0
     v1 -> v4

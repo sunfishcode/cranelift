@@ -11,7 +11,7 @@ target i686
 ; This ended up confusong the constraint solver which had not made a record of
 ; the fixed register assignment for v9 since it was already in the correct
 ; register.
-function %pr147(i32) -> i32 system_v {
+function @pr147(i32) -> i32 system_v {
 ebb0(v0: i32):
     v1 = iconst.i32 0
     v2 = iconst.i32 1
@@ -39,7 +39,7 @@ ebb3:
     return v5
 }
 
-function %select_i64(i64, i64, i32) -> i64 {
+function @select_i64(i64, i64, i32) -> i64 {
 ebb0(v0: i64, v1: i64, v2: i32):
     v3 = select v2, v0, v1
     return v3

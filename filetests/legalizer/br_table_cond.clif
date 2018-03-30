@@ -5,7 +5,7 @@ target x86_64
 
 ; Test that when jump_tables_enables is false, all jump tables are eliminated.
 
-function u0:0(i64 vmctx) baldrdash {
+function @[0:0](i64 vmctx) baldrdash {
     gv0 = vmctx
     gv1 = iadd_imm.i64 gv0, 48
     jt0 = jump_table [ebb2, ebb2, ebb7]

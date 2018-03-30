@@ -7,7 +7,7 @@ target i686 haswell
 ;   sed -ne 's/^ *; asm: *//p' filetests/isa/x86/binary32-float.clif | llvm-mc -show-encoding -triple=i386
 ;
 
-function %F32() {
+function @F32() {
     ss0 = incoming_arg 8, offset 0
     ss1 = incoming_arg 1024, offset -1024
     ss2 = incoming_arg 1024, offset -2048
@@ -256,7 +256,7 @@ ebb0:
     return
 }
 
-function %F64() {
+function @F64() {
     ss0 = incoming_arg 8, offset 0
     ss1 = incoming_arg 1024, offset -1024
     ss2 = incoming_arg 1024, offset -2048
@@ -471,7 +471,7 @@ ebb0:
     return
 }
 
-function %cpuflags_float(f32 [%xmm0]) {
+function @cpuflags_float(f32 [%xmm0]) {
 ebb0(v0: f32 [%xmm0]):
     ; asm: ucomiss %xmm0, %xmm0
     [-,%rflags]         v1 = ffcmp v0, v0                       ; bin: 0f 2e c0

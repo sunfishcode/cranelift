@@ -3,8 +3,8 @@ test legalizer
 set opt_level=best
 target x86_64 haswell
 
-function %call() {
-    fn0 = %foo()
+function @call() {
+    fn0 = @foo()
 ebb0:
     call fn0()
     return

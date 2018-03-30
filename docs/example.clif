@@ -1,6 +1,6 @@
 test verifier
 
-function %average(i32, i32) -> f32 system_v {
+function @average(i32, i32) -> f32 system_v {
     ss0 = explicit_slot 8         ; Stack slot for ``sum``.
 
 ebb1(v0: i32, v1: i32):

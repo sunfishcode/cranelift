@@ -1,7 +1,7 @@
 test licm
 target riscv32
 
-function %complex(i32) -> i32 system_v {
+function @complex(i32) -> i32 system_v {
 ebb0(v0: i32):
 [UJ#1b]    jump ebb1(v0)
 
@@ -42,7 +42,7 @@ ebb0(v0: i32):
 [Iret#19]   return v19
 }
 
-; sameln: function %complex
+; sameln: function @complex
 ; nextln: ebb0(v0: i32):
 ; nextln:     v2 = iconst.i32 1
 ; nextln:     v3 = iconst.i32 4

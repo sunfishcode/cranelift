@@ -8,11 +8,11 @@ target i686 haswell
 ;   sed -ne 's/^ *; asm: *//p' filetests/isa/x86/binary32.clif | llvm-mc -show-encoding -triple=i386
 ;
 
-function %I32() {
+function @I32() {
     sig0 = ()
-    fn0 = %foo()
+    fn0 = @foo()
 
-    gv0 = symbol %some_gv
+    gv0 = symbol @some_gv
 
     ss0 = incoming_arg 8, offset 0
     ss1 = incoming_arg 1024, offset -1024
@@ -352,12 +352,12 @@ ebb0:
     [-,%rsi]             v351 = bint.i32 v301   ; bin: 0f b6 f2
 
     ; asm: call foo
-    call fn0()                                  ; bin: stk_ovf e8 CallPCRel4(%foo-4) 00000000
+    call fn0()                                  ; bin: stk_ovf e8 CallPCRel4(@foo-4) 00000000
 
     ; asm: movl $0, %ecx
-    [-,%rcx]            v400 = func_addr.i32 fn0        ; bin: b9 Abs4(%foo) 00000000
+    [-,%rcx]            v400 = func_addr.i32 fn0        ; bin: b9 Abs4(@foo) 00000000
     ; asm: movl $0, %esi
-    [-,%rsi]            v401 = func_addr.i32 fn0        ; bin: be Abs4(%foo) 00000000
+    [-,%rsi]            v401 = func_addr.i32 fn0        ; bin: be Abs4(@foo) 00000000
 
     ; asm: call *%ecx
     call_indirect sig0, v400()                  ; bin: stk_ovf ff d1
@@ -365,9 +365,9 @@ ebb0:
     call_indirect sig0, v401()                  ; bin: stk_ovf ff d6
 
     ; asm: movl $0, %ecx
-    [-,%rcx]            v450 = symbol_value.i32 gv0    ; bin: b9 Abs4(%some_gv) 00000000
+    [-,%rcx]            v450 = symbol_value.i32 gv0    ; bin: b9 Abs4(@some_gv) 00000000
     ; asm: movl $0, %esi
-    [-,%rsi]            v451 = symbol_value.i32 gv0    ; bin: be Abs4(%some_gv) 00000000
+    [-,%rsi]            v451 = symbol_value.i32 gv0    ; bin: be Abs4(@some_gv) 00000000
 
     ; Spill / Fill.
 
@@ -490,7 +490,7 @@ ebb2:
 }
 
 ; Special branch encodings only for I32 mode.
-function %special_branches() {
+function @special_branches() {
 ebb0:
     [-,%rcx]            v1 = iconst.i32 1
     [-,%rsi]            v2 = iconst.i32 2
@@ -517,7 +517,7 @@ ebb1:
 }
 
 ; CPU flag instructions.
-function %cpu_flags() {
+function @cpu_flags() {
 ebb0:
     [-,%rcx]            v1 = iconst.i32 1
     [-,%rsi]            v2 = iconst.i32 2
@@ -613,7 +613,7 @@ ebb1:
 }
 
 ; Tests for i32/i8 conversion instructions.
-function %I32_I8() {
+function @I32_I8() {
 ebb0:
     [-,%rcx]            v1 = iconst.i32 1
 
@@ -629,7 +629,7 @@ ebb0:
 }
 
 ; Tests for i32/i16 conversion instructions.
-function %I32_I16() {
+function @I32_I16() {
 ebb0:
     [-,%rcx]            v1 = iconst.i32 1
 

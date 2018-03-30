@@ -2,7 +2,7 @@ test shrink
 set opt_level=best
 target x86_64
 
-function %test_multiple_uses(i32 [%rdi]) -> i32 {
+function @test_multiple_uses(i32 [%rdi]) -> i32 {
 ebb0(v0: i32 [%rdi]):
 [Op1rcmp_ib#7083,%rflags]           v3 = ifcmp_imm v0, 0
 [Op2seti_abcd#490,%rax]             v1 = trueif eq v3

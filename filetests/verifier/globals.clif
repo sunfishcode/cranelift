@@ -1,7 +1,7 @@
 test verifier
 target x86_64
 
-function %load_base_type(i64 vmctx) {
+function @load_base_type(i64 vmctx) {
     gv0 = vmctx
     gv1 = load.i32 notrap aligned gv0
     gv2 = load.i32 notrap aligned gv1 ; error: base gv1 has type i32, which is not the pointer type i64
@@ -10,7 +10,7 @@ ebb0(v0: i64):
     return
 }
 
-function %global_value_wrong_type(i64 vmctx) {
+function @global_value_wrong_type(i64 vmctx) {
     gv0 = vmctx
 
 ebb0(v0: i64):

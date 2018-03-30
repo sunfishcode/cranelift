@@ -40,8 +40,8 @@ pub enum Token<'a> {
     JumpTable(u32),       // jt2
     FuncRef(u32),         // fn2
     SigRef(u32),          // sig2
-    UserRef(u32),         // u345
-    Name(&'a str),        // %9arbitrary_alphanum, %x3, %0, %function ...
+    Name(&'a str),        // @foo, @"foo bar", @[2:3], @<Libcall>, ...
+    RegName(&'a str),     // %foo
     HexSequence(&'a str), // #89AF
     Identifier(&'a str),  // Unrecognized identifier (opcode, enumerator, ...)
     SourceLoc(&'a str),   // @00c7
@@ -344,7 +344,6 @@ impl<'a> Lexer<'a> {
             "jt" => Some(Token::JumpTable(number)),
             "fn" => Some(Token::FuncRef(number)),
             "sig" => Some(Token::SigRef(number)),
-            "u" => Some(Token::UserRef(number)),
             _ => None,
         }
     }
@@ -384,18 +383,90 @@ impl<'a> Lexer<'a> {
 
     fn scan_name(&mut self) -> Result<LocatedToken<'a>, LocatedError> {
         let loc = self.loc();
-        let begin = self.pos + 1;
+        let begin = self.pos;
 
-        assert_eq!(self.lookahead, Some('%'));
+        assert_eq!(self.lookahead, Some('@'));
 
-        while let Some(c) = self.next_ch() {
-            if !(c.is_ascii() && c.is_alphanumeric() || c == '_') {
-                break;
+        match self.next_ch() {
+            None => return error(LexError::InvalidChar, self.loc()),
+            Some('-') => {
+                self.next_ch();
             }
+            Some('"') => {
+                while let Some(c) = self.next_ch() {
+                    if c == '"' {
+                        self.next_ch();
+                        break;
+                    }
+                    if !c.is_ascii() || c.is_ascii_control() || c == '\\' {
+                        return error(LexError::InvalidChar, self.loc());
+                    }
+                }
+            }
+            Some('<') => {
+                while let Some(c) = self.next_ch() {
+                    if c == '>' {
+                        self.next_ch();
+                        break;
+                    }
+                    if !c.is_ascii() || c.is_ascii_control() || c == '\\' {
+                        return error(LexError::InvalidChar, self.loc());
+                    }
+                }
+            }
+            Some('[') => {
+                while let Some(c) = self.next_ch() {
+                    if c == ':' {
+                        break;
+                    }
+                    if !c.is_ascii_digit() {
+                        return error(LexError::InvalidChar, self.loc());
+                    }
+                }
+                while let Some(c) = self.next_ch() {
+                    if c == ']' {
+                        self.next_ch();
+                        break;
+                    }
+                    if !c.is_ascii_digit() {
+                        return error(LexError::InvalidChar, self.loc());
+                    }
+                }
+            }
+            Some('a'...'z') | Some('A'...'Z') | Some('0'...'9') | Some('_') => {
+                while let Some(c) = self.next_ch() {
+                    if !c.is_ascii_alphanumeric() && c != '_' {
+                        break;
+                    }
+                }
+            }
+            Some(_) => return error(LexError::InvalidChar, self.loc()),
         }
 
         let end = self.pos;
         token(Token::Name(&self.source[begin..end]), loc)
+    }
+
+    fn scan_regname(&mut self) -> Result<LocatedToken<'a>, LocatedError> {
+        let loc = self.loc();
+        let begin = self.pos;
+
+        assert_eq!(self.lookahead, Some('%'));
+
+        match self.next_ch() {
+            None => return error(LexError::InvalidChar, self.loc()),
+            Some('a'...'z') | Some('A'...'Z') | Some('0'...'9') | Some('_') => {
+                while let Some(c) = self.next_ch() {
+                    if !c.is_ascii_alphanumeric() && c != '_' {
+                        break;
+                    }
+                }
+            }
+            Some(_) => return error(LexError::InvalidChar, self.loc()),
+        }
+
+        let end = self.pos;
+        token(Token::RegName(&self.source[begin..end]), loc)
     }
 
     fn scan_hex_sequence(&mut self) -> Result<LocatedToken<'a>, LocatedError> {
@@ -418,7 +489,7 @@ impl<'a> Lexer<'a> {
         let loc = self.loc();
         let begin = self.pos + 1;
 
-        assert_eq!(self.lookahead, Some('@'));
+        assert_eq!(self.lookahead, Some('!'));
 
         while let Some(c) = self.next_ch() {
             if !char::is_digit(c, 16) {
@@ -459,9 +530,10 @@ impl<'a> Lexer<'a> {
                 }
                 Some(ch) if ch.is_digit(10) => Some(self.scan_number()),
                 Some(ch) if ch.is_alphabetic() => Some(self.scan_word()),
-                Some('%') => Some(self.scan_name()),
+                Some('@') => Some(self.scan_name()),
+                Some('%') => Some(self.scan_regname()),
                 Some('#') => Some(self.scan_hex_sequence()),
-                Some('@') => Some(self.scan_srcloc()),
+                Some('!') => Some(self.scan_srcloc()),
                 Some(ch) if ch.is_whitespace() => {
                     self.next_ch();
                     continue;
@@ -618,28 +690,48 @@ mod tests {
 
     #[test]
     fn lex_names() {
-        let mut lex = Lexer::new("%0 %x3 %function %123_abc %ss0 %v3 %ebb11 %_");
+        let mut lex = Lexer::new("@a @x3 @function @_0123_abc @ss0 @v3 @ebb11 @_");
 
-        assert_eq!(lex.next(), token(Token::Name("0"), 1));
-        assert_eq!(lex.next(), token(Token::Name("x3"), 1));
-        assert_eq!(lex.next(), token(Token::Name("function"), 1));
-        assert_eq!(lex.next(), token(Token::Name("123_abc"), 1));
-        assert_eq!(lex.next(), token(Token::Name("ss0"), 1));
-        assert_eq!(lex.next(), token(Token::Name("v3"), 1));
-        assert_eq!(lex.next(), token(Token::Name("ebb11"), 1));
-        assert_eq!(lex.next(), token(Token::Name("_"), 1));
+        assert_eq!(lex.next(), token(Token::Name("@a"), 1));
+        assert_eq!(lex.next(), token(Token::Name("@x3"), 1));
+        assert_eq!(lex.next(), token(Token::Name("@function"), 1));
+        assert_eq!(lex.next(), token(Token::Name("@_0123_abc"), 1));
+        assert_eq!(lex.next(), token(Token::Name("@ss0"), 1));
+        assert_eq!(lex.next(), token(Token::Name("@v3"), 1));
+        assert_eq!(lex.next(), token(Token::Name("@ebb11"), 1));
+        assert_eq!(lex.next(), token(Token::Name("@_"), 1));
     }
 
     #[test]
-    fn lex_userrefs() {
-        let mut lex = Lexer::new("u0 u1 u234567890 u9:8765");
+    fn lex_quoted_names() {
+        let mut lex = Lexer::new("@\"a a\" @\"3\" @\".$@*()\" @\"\"");
 
-        assert_eq!(lex.next(), token(Token::UserRef(0), 1));
-        assert_eq!(lex.next(), token(Token::UserRef(1), 1));
-        assert_eq!(lex.next(), token(Token::UserRef(234567890), 1));
-        assert_eq!(lex.next(), token(Token::UserRef(9), 1));
-        assert_eq!(lex.next(), token(Token::Colon, 1));
-        assert_eq!(lex.next(), token(Token::Integer("8765"), 1));
-        assert_eq!(lex.next(), None);
+        assert_eq!(lex.next(), token(Token::Name("@\"a a\""), 1));
+        assert_eq!(lex.next(), token(Token::Name("@\"3\""), 1));
+        assert_eq!(lex.next(), token(Token::Name("@\".$@*()\""), 1));
+        assert_eq!(lex.next(), token(Token::Name("@\"\""), 1));
+    }
+
+    #[test]
+    fn lex_index_names() {
+        let mut lex = Lexer::new("@[0:0] @[333:000] @[8:9]");
+
+        assert_eq!(lex.next(), token(Token::Name("@[0:0]"), 1));
+        assert_eq!(lex.next(), token(Token::Name("@[333:000]"), 1));
+        assert_eq!(lex.next(), token(Token::Name("@[8:9]"), 1));
+    }
+
+    #[test]
+    fn lex_libcall_names() {
+        let mut lex = Lexer::new("@<CeilF32>");
+
+        assert_eq!(lex.next(), token(Token::Name("@<CeilF32>"), 1));
+    }
+
+    #[test]
+    fn lex_default_names() {
+        let mut lex = Lexer::new("@-");
+
+        assert_eq!(lex.next(), token(Token::Name("@-"), 1));
     }
 }

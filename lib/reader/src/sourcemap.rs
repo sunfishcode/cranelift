@@ -216,7 +216,7 @@ mod tests {
     #[test]
     fn details() {
         let tf = parse_test(
-            "function %detail() {
+            "function @detail() {
                                ss10 = incoming_arg 13
                                jt10 = jump_table [ebb0]
                              ebb0(v4: i32, v7: i32):

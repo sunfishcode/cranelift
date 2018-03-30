@@ -1,7 +1,7 @@
 test regalloc
 target x86_64 haswell
 
-function %test(i64) -> i64 system_v {
+function @test(i64) -> i64 system_v {
 ebb0(v0: i64):
     v2 = iconst.i64 12
     ; This division clobbers two of its fixed input registers on x86.

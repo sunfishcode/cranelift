@@ -8,7 +8,7 @@ target x86_64 haswell
 ;   sed -ne 's/^ *; asm: *//p' filetests/isa/x86/stack-addr64.clif | llvm-mc -show-encoding -triple=x86_64
 ;
 
-function %stack_addr() {
+function @stack_addr() {
            ss0 = incoming_arg 8, offset 0
            ss1 = incoming_arg 1024, offset -1024
            ss2 = incoming_arg 1024, offset -2048

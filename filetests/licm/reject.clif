@@ -1,7 +1,7 @@
 test licm
 target riscv32
 
-function %other_side_effects(i32) -> i32 {
+function @other_side_effects(i32) -> i32 {
 
 ebb0(v0: i32):
     jump ebb1(v0)
@@ -20,7 +20,7 @@ ebb2(v6: i32):
 
 }
 
-function %cpu_flags(i32, i32) -> i32 {
+function @cpu_flags(i32, i32) -> i32 {
 ebb0(v0: i32, v1: i32):
     jump ebb1(v0, v1)
 
@@ -40,7 +40,7 @@ ebb2(v6: i32):
     return v6
 }
 
-function %spill(i32, i32) -> i32 {
+function @spill(i32, i32) -> i32 {
 ebb0(v0: i32, v1: i32):
     v2 = spill.i32 v0
     jump ebb1(v0, v1)
@@ -61,7 +61,7 @@ ebb2(v10: i32):
     return v10
 }
 
-function %non_invariant_aliases(i32) -> i32 {
+function @non_invariant_aliases(i32) -> i32 {
 
 ebb0(v0: i32):
     jump ebb1(v0)

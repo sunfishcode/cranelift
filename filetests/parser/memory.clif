@@ -1,7 +1,7 @@
 test cat
 test verifier
 
-function %vmglobal(i64 vmctx) -> i32 {
+function @vmglobal(i64 vmctx) -> i32 {
     gv3 = vmctx
     ; check: gv3 = vmctx
 ebb0(v0: i64):
@@ -10,7 +10,7 @@ ebb0(v0: i64):
     return v1
 }
 
-function %load_and_add_imm(i64 vmctx) -> i32 {
+function @load_and_add_imm(i64 vmctx) -> i32 {
     gv2 = vmctx
     gv3 = load.i32 notrap aligned gv2-72
     gv4 = iadd_imm.i32 gv3, -32
@@ -24,7 +24,7 @@ ebb0(v0: i64):
 }
 
 ; Refer to a global value before it's been declared.
-function %backref(i64 vmctx) -> i32 {
+function @backref(i64 vmctx) -> i32 {
     gv0 = iadd_imm.i32 gv1, -32
     ; check: gv0 = iadd_imm.i32 gv1, -32
     gv1 = load.i32 notrap aligned gv2
@@ -36,11 +36,11 @@ ebb0(v0: i64):
     return v1
 }
 
-function %symbol() -> i32 {
-    gv0 = symbol %something
-    ; check: gv0 = symbol %something
-    gv1 = symbol u8:9
-    ; check: gv1 = symbol u8:9
+function @symbol() -> i32 {
+    gv0 = symbol @something
+    ; check: gv0 = symbol @something
+    gv1 = symbol @[8:9]
+    ; check: gv1 = symbol @[8:9]
 ebb0:
     v0 = global_value.i32 gv0
     ; check: v0 = global_value.i32 gv0
@@ -51,7 +51,7 @@ ebb0:
 }
 
 ; Declare static heaps.
-function %sheap(i32, i64 vmctx) -> i64 {
+function @sheap(i32, i64 vmctx) -> i64 {
     heap1 = static gv5, min 0x1_0000, bound 0x1_0000_0000, guard 0x8000_0000
     heap2 = static gv5, guard 0x1000, bound 0x1_0000
     gv4 = vmctx
@@ -66,7 +66,7 @@ ebb0(v1: i32, v2: i64):
 }
 
 ; Declare dynamic heaps.
-function %dheap(i32, i64 vmctx) -> i64 {
+function @dheap(i32, i64 vmctx) -> i64 {
     heap1 = dynamic gv5, min 0x1_0000, bound gv6, guard 0x8000_0000
     heap2 = dynamic gv5, bound gv6, guard 0x1000
     gv4 = vmctx

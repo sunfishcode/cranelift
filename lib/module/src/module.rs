@@ -22,8 +22,8 @@ entity_impl!(FuncId, "funcid");
 /// Function identifiers are namespace 0 in `ir::ExternalName`
 impl From<FuncId> for ir::ExternalName {
     fn from(id: FuncId) -> Self {
-        ir::ExternalName::User {
-            namespace: 0,
+        ir::ExternalName::Index {
+            space: 0,
             index: id.0,
         }
     }
@@ -37,8 +37,8 @@ entity_impl!(DataId, "dataid");
 /// Data identifiers are namespace 1 in `ir::ExternalName`
 impl From<DataId> for ir::ExternalName {
     fn from(id: DataId) -> Self {
-        ir::ExternalName::User {
-            namespace: 1,
+        ir::ExternalName::Index {
+            space: 1,
             index: id.0,
         }
     }
@@ -225,8 +225,8 @@ where
     B: Backend,
 {
     fn get_function_info(&self, name: &ir::ExternalName) -> &ModuleFunction<B> {
-        if let ir::ExternalName::User { namespace, index } = *name {
-            debug_assert_eq!(namespace, 0);
+        if let ir::ExternalName::Index { space, index } = *name {
+            debug_assert_eq!(space, 0);
             let func = FuncId::new(index as usize);
             &self.functions[func]
         } else {
@@ -236,8 +236,8 @@ where
 
     /// Get the `DataDeclaration` for the function named by `name`.
     fn get_data_info(&self, name: &ir::ExternalName) -> &ModuleData<B> {
-        if let ir::ExternalName::User { namespace, index } = *name {
-            debug_assert_eq!(namespace, 1);
+        if let ir::ExternalName::Index { space, index } = *name {
+            debug_assert_eq!(space, 1);
             let data = DataId::new(index as usize);
             &self.data_objects[data]
         } else {
@@ -309,8 +309,8 @@ where
 
     /// Return whether `name` names a function, rather than a data object.
     pub fn is_function(&self, name: &ir::ExternalName) -> bool {
-        if let ir::ExternalName::User { namespace, .. } = *name {
-            namespace == 0
+        if let ir::ExternalName::Index { space, .. } = *name {
+            space == 0
         } else {
             panic!("unexpected ExternalName kind {}", name)
         }
@@ -478,7 +478,7 @@ where
         let signature = in_func.import_signature(decl.signature.clone());
         let colocated = decl.linkage.is_final();
         in_func.import_function(ir::ExtFuncData {
-            name: ir::ExternalName::user(0, func.index() as u32),
+            name: ir::ExternalName::index(0, func.index() as u32),
             signature,
             colocated,
         })
@@ -491,7 +491,7 @@ where
         let decl = &self.contents.data_objects[data].decl;
         let colocated = decl.linkage.is_final();
         func.create_global_value(ir::GlobalValueData::Symbol {
-            name: ir::ExternalName::user(1, data.index() as u32),
+            name: ir::ExternalName::index(1, data.index() as u32),
             offset: ir::immediates::Imm64::new(0),
             colocated,
         })
@@ -499,12 +499,12 @@ where
 
     /// TODO: Same as above.
     pub fn declare_func_in_data(&self, func: FuncId, ctx: &mut DataContext) -> ir::FuncRef {
-        ctx.import_function(ir::ExternalName::user(0, func.index() as u32))
+        ctx.import_function(ir::ExternalName::index(0, func.index() as u32))
     }
 
     /// TODO: Same as above.
     pub fn declare_data_in_data(&self, data: DataId, ctx: &mut DataContext) -> ir::GlobalValue {
-        ctx.import_global_value(ir::ExternalName::user(1, data.index() as u32))
+        ctx.import_global_value(ir::ExternalName::index(1, data.index() as u32))
     }
 
     /// Define a function, producing the function body from the given `Context`.

@@ -3,7 +3,7 @@ test legalizer
 set opt_level=fastest
 target x86_64 haswell
 
-function %stack_load_and_store() {
+function @stack_load_and_store() {
            ss0 = explicit_slot 8, offset 0
 
 ebb0:

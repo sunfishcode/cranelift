@@ -42,7 +42,7 @@ fn define_simple_function(module: &mut Module<SimpleJITBackend>) -> FuncId {
         .unwrap();
 
     let mut ctx = Context::new();
-    ctx.func = Function::with_name_signature(ExternalName::user(0, func_id.index() as u32), sig);
+    ctx.func = Function::with_name_signature(ExternalName::index(0, func_id.index() as u32), sig);
     let mut func_ctx = FunctionBuilderContext::new();
     {
         let mut bcx: FunctionBuilder = FunctionBuilder::new(&mut ctx.func, &mut func_ctx);
@@ -88,7 +88,7 @@ fn switch_error() {
         call_conv: CallConv::SystemV,
     };
 
-    let mut func = Function::with_name_signature(ExternalName::user(0, 0), sig);
+    let mut func = Function::with_name_signature(ExternalName::index(0, 0), sig);
 
     let mut func_ctx = FunctionBuilderContext::new();
     {

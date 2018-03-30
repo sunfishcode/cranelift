@@ -8,7 +8,7 @@ target x86_64 haswell
 ;
 ; Test case by binaryen fuzzer!
 
-function %pr215(i64 vmctx [%rdi]) system_v {
+function @pr215(i64 vmctx [%rdi]) system_v {
 ebb0(v0: i64):
     v10 = iconst.i64 0
     v1 = bitcast.f64 v10

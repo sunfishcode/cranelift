@@ -1,7 +1,7 @@
 test preopt
 target x86_64
 
-function %brz_fold() -> i32 {
+function @brz_fold() -> i32 {
 ebb0:
     v0 = bconst.b1 false
     brz v0, ebb2
@@ -13,7 +13,7 @@ ebb2:
     v2 = iconst.i32 24
     return v2
 }
-; sameln: function %brz_fold
+; sameln: function @brz_fold
 ; nextln: ebb0:
 ; nextln:     v0 = bconst.b1 false
 ; nextln:     jump ebb2
@@ -27,7 +27,7 @@ ebb2:
 ; nextln:     return v2
 ; nextln: }
 
-function %brnz_fold() -> i32 {
+function @brnz_fold() -> i32 {
 ebb0:
     v0 = bconst.b1 true
     brnz v0, ebb2
@@ -39,7 +39,7 @@ ebb2:
     v2 = iconst.i32 24
     return v2
 }
-; sameln: function %brnz_fold
+; sameln: function @brnz_fold
 ; nextln: ebb0:
 ; nextln:     v0 = bconst.b1 true
 ; nextln:     jump ebb2

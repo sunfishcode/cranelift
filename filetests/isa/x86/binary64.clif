@@ -9,12 +9,12 @@ target x86_64 haswell
 ;
 
 ; Tests for i64 instructions.
-function %I64() {
+function @I64() {
     sig0 = ()
-    fn0 = %foo()
-    fn1 = colocated %bar()
+    fn0 = @foo()
+    fn1 = colocated @bar()
 
-    gv0 = symbol %some_gv
+    gv0 = symbol @some_gv
 
     ; Use incoming_arg stack slots because they won't be relocated by the frame
     ; layout.
@@ -485,14 +485,14 @@ ebb0:
     ; Colocated functions.
 
     ; asm: call bar
-    call fn1()                                  ; bin: stk_ovf e8 CallPCRel4(%bar-4) 00000000
+    call fn1()                                  ; bin: stk_ovf e8 CallPCRel4(@bar-4) 00000000
 
     ; asm: lea 0x0(%rip), %rcx
-    [-,%rcx]            v400 = func_addr.i64 fn1        ; bin: 48 8d 0d PCRel4(%bar-4) 00000000
+    [-,%rcx]            v400 = func_addr.i64 fn1        ; bin: 48 8d 0d PCRel4(@bar-4) 00000000
     ; asm: lea 0x0(%rip), %rsi
-    [-,%rsi]            v401 = func_addr.i64 fn1        ; bin: 48 8d 35 PCRel4(%bar-4) 00000000
+    [-,%rsi]            v401 = func_addr.i64 fn1        ; bin: 48 8d 35 PCRel4(@bar-4) 00000000
     ; asm: lea 0x0(%rip), %r10
-    [-,%r10]            v402 = func_addr.i64 fn1        ; bin: 4c 8d 15 PCRel4(%bar-4) 00000000
+    [-,%r10]            v402 = func_addr.i64 fn1        ; bin: 4c 8d 15 PCRel4(@bar-4) 00000000
 
     ; asm: call *%rcx
     call_indirect sig0, v400()                  ; bin: stk_ovf ff d1
@@ -504,11 +504,11 @@ ebb0:
     ; Non-colocated functions. Note that there is no non-colocated non-PIC call.
 
     ; asm: movabsq $0, %rcx
-    [-,%rcx]            v410 = func_addr.i64 fn0        ; bin: 48 b9 Abs8(%foo) 0000000000000000
+    [-,%rcx]            v410 = func_addr.i64 fn0        ; bin: 48 b9 Abs8(@foo) 0000000000000000
     ; asm: movabsq $0, %rsi
-    [-,%rsi]            v411 = func_addr.i64 fn0        ; bin: 48 be Abs8(%foo) 0000000000000000
+    [-,%rsi]            v411 = func_addr.i64 fn0        ; bin: 48 be Abs8(@foo) 0000000000000000
     ; asm: movabsq $0, %r10
-    [-,%r10]            v412 = func_addr.i64 fn0        ; bin: 49 ba Abs8(%foo) 0000000000000000
+    [-,%r10]            v412 = func_addr.i64 fn0        ; bin: 49 ba Abs8(@foo) 0000000000000000
 
     ; asm: call *%rcx
     call_indirect sig0, v410()                  ; bin: stk_ovf ff d1
@@ -518,11 +518,11 @@ ebb0:
     call_indirect sig0, v412()                  ; bin: stk_ovf 41 ff d2
 
     ; asm: movabsq $-1, %rcx
-    [-,%rcx]            v450 = symbol_value.i64 gv0    ; bin: 48 b9 Abs8(%some_gv) 0000000000000000
+    [-,%rcx]            v450 = symbol_value.i64 gv0    ; bin: 48 b9 Abs8(@some_gv) 0000000000000000
     ; asm: movabsq $-1, %rsi
-    [-,%rsi]            v451 = symbol_value.i64 gv0    ; bin: 48 be Abs8(%some_gv) 0000000000000000
+    [-,%rsi]            v451 = symbol_value.i64 gv0    ; bin: 48 be Abs8(@some_gv) 0000000000000000
     ; asm: movabsq $-1, %r10
-    [-,%r10]            v452 = symbol_value.i64 gv0    ; bin: 49 ba Abs8(%some_gv) 0000000000000000
+    [-,%r10]            v452 = symbol_value.i64 gv0    ; bin: 49 ba Abs8(@some_gv) 0000000000000000
 
     ; Spill / Fill.
 
@@ -708,7 +708,7 @@ ebb2:
 }
 
 ; CPU flag instructions.
-function %cpu_flags_I64() {
+function @cpu_flags_I64() {
 ebb0:
     [-,%rcx]            v1 = iconst.i64 1
     [-,%r10]            v2 = iconst.i64 2
@@ -805,7 +805,7 @@ ebb1:
 }
 
 ; Test for the encoding of outgoing_arg stack slots.
-function %outargs() {
+function @outargs() {
     ss0 = incoming_arg 16, offset -16
     ss1 = outgoing_arg 8, offset 8
     ss2 = outgoing_arg 8, offset 0
@@ -827,9 +827,9 @@ ebb0:
 ; prefix if they only use the low 8 registers. Here, we are testing the REX
 ; encodings which are chosen by default. Switching to non-REX encodings should
 ; be done by an instruction shrinking pass.
-function %I32() {
+function @I32() {
     sig0 = ()
-    fn0 = %foo()
+    fn0 = @foo()
 
     ss0 = incoming_arg 8, offset 0
     ss1 = incoming_arg 1024, offset -1024
@@ -1264,7 +1264,7 @@ ebb2:
 }
 
 ; Tests for i32/i8 conversion instructions.
-function %I32_I8() {
+function @I32_I8() {
 ebb0:
     [-,%rcx]            v1 = iconst.i32 1
     [-,%rsi]            v2 = iconst.i32 2
@@ -1292,7 +1292,7 @@ ebb0:
 }
 
 ; Tests for i32/i16 conversion instructions.
-function %I32_I16() {
+function @I32_I16() {
 ebb0:
     [-,%rcx]            v1 = iconst.i32 1
     [-,%rsi]            v2 = iconst.i32 2
@@ -1320,7 +1320,7 @@ ebb0:
 }
 
 ; Tests for i64/i8 conversion instructions.
-function %I64_I8() {
+function @I64_I8() {
 ebb0:
     [-,%rcx]            v1 = iconst.i64 1
     [-,%rsi]            v2 = iconst.i64 2
@@ -1348,7 +1348,7 @@ ebb0:
 }
 
 ; Tests for i64/i16 conversion instructions.
-function %I64_I16() {
+function @I64_I16() {
 ebb0:
     [-,%rcx]            v1 = iconst.i64 1
     [-,%rsi]            v2 = iconst.i64 2
@@ -1376,7 +1376,7 @@ ebb0:
 }
 
 ; Tests for i64/i32 conversion instructions.
-function %I64_I32() {
+function @I64_I32() {
 ebb0:
     [-,%rcx]            v1 = iconst.i64 1
     [-,%rsi]            v2 = iconst.i64 2
@@ -1404,7 +1404,7 @@ ebb0:
 }
 
 ; Tests for i64 jump table instructions.
-function %I64_JT(i64 [%rdi]) {
+function @I64_JT(i64 [%rdi]) {
     jt0 = jump_table [ebb1, ebb2, ebb3]
 
 ebb0(v0: i64 [%rdi]):
@@ -1441,7 +1441,7 @@ ebb3:
     trap user0
 }
 
-function %r12_r13_loads() {
+function @r12_r13_loads() {
 ebb0:
     [-,%r12]            v1 = iconst.i64 0x0123_4567_89ab_cdef
     [-,%r13]            v2 = iconst.i64 0xfedc_ba98_7654_3210
@@ -1498,7 +1498,7 @@ ebb0:
     return
 }
 
-function %r12_r13_stores() {
+function @r12_r13_stores() {
 ebb0:
     [-,%r12]            v1 = iconst.i64 0x0123_4567_89ab_cdef
     [-,%r13]            v2 = iconst.i64 0xfedc_ba98_7654_3210

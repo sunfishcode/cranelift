@@ -2,7 +2,7 @@
 test binemit
 target riscv32
 
-function %regmoves(i32 link [%x1]) -> i32 link [%x1] {
+function @regmoves(i32 link [%x1]) -> i32 link [%x1] {
 ebb0(v9999: i32):
     [-,%x10]            v1 = iconst.i32 1
     [-,%x7]             v2 = iadd_imm v1, 1000          ; bin: 3e850393

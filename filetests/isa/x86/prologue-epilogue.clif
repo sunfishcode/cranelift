@@ -5,12 +5,12 @@ target x86_64 haswell
 
 ; An empty function.
 
-function %empty() {
+function @empty() {
 ebb0:
     return
 }
 
-; check: function %empty(i64 fp [%rbp]) -> i64 fp [%rbp] fast {
+; check: function @empty(i64 fp [%rbp]) -> i64 fp [%rbp] fast {
 ; nextln:     ss0 = incoming_arg 16, offset -16
 ; nextln: 
 ; nextln: ebb0(v0: i64 [%rbp]):
@@ -22,13 +22,13 @@ ebb0:
 
 ; A function with a single stack slot.
 
-function %one_stack_slot() {
+function @one_stack_slot() {
     ss0 = explicit_slot 168
 ebb0:
     return
 }
 
-; check: function %one_stack_slot(i64 fp [%rbp]) -> i64 fp [%rbp] fast {
+; check: function @one_stack_slot(i64 fp [%rbp]) -> i64 fp [%rbp] fast {
 ; nextln:     ss0 = explicit_slot 168, offset -184
 ; nextln:     ss1 = incoming_arg 16, offset -16
 ; nextln: 
@@ -43,18 +43,18 @@ ebb0:
 
 ; A function performing a call.
 
-function %call() {
-    fn0 = %foo()
+function @call() {
+    fn0 = @foo()
 
 ebb0:
     call fn0()
     return
 }
 
-; check: function %call(i64 fp [%rbp]) -> i64 fp [%rbp] fast {
+; check: function @call(i64 fp [%rbp]) -> i64 fp [%rbp] fast {
 ; nextln:     ss0 = incoming_arg 16, offset -16
 ; nextln:     sig0 = () fast
-; nextln:     fn0 = %foo sig0
+; nextln:     fn0 = @foo sig0
 ; nextln: 
 ; nextln: ebb0(v0: i64 [%rbp]):
 ; nextln:     x86_push v0
@@ -66,7 +66,7 @@ ebb0:
 
 ; A function that uses a lot of registers but doesn't quite need to spill.
 
-function %no_spill(i64, i64) {
+function @no_spill(i64, i64) {
 ebb0(v0: i64, v1: i64):
     v2 = load.i32 v0+0
     v3 = load.i32 v0+8
@@ -97,7 +97,7 @@ ebb0(v0: i64, v1: i64):
     return
 }
 
-; check: function %no_spill(i64 [%rdi], i64 [%rsi], i64 fp [%rbp], i64 csr [%rbx], i64 csr [%r12], i64 csr [%r13], i64 csr [%r14], i64 csr [%r15]) -> i64 fp [%rbp], i64 csr [%rbx], i64 csr [%r12], i64 csr [%r13], i64 csr [%r14], i64 csr [%r15] fast {
+; check: function @no_spill(i64 [%rdi], i64 [%rsi], i64 fp [%rbp], i64 csr [%rbx], i64 csr [%r12], i64 csr [%r13], i64 csr [%r14], i64 csr [%r15]) -> i64 fp [%rbp], i64 csr [%rbx], i64 csr [%r12], i64 csr [%r13], i64 csr [%r14], i64 csr [%r15] fast {
 ; nextln:     ss0 = incoming_arg 56, offset -56
 ; nextln: 
 ; nextln: ebb0(v0: i64 [%rdi], v1: i64 [%rsi], v15: i64 [%rbp], v16: i64 [%rbx], v17: i64 [%r12], v18: i64 [%r13], v19: i64 [%r14], v20: i64 [%r15]):
@@ -147,7 +147,7 @@ ebb0(v0: i64, v1: i64):
 
 ; This function requires too many registers and must spill.
 
-function %yes_spill(i64, i64) {
+function @yes_spill(i64, i64) {
 ebb0(v0: i64, v1: i64):
     v2 = load.i32 v0+0
     v3 = load.i32 v0+8
@@ -180,7 +180,7 @@ ebb0(v0: i64, v1: i64):
     return
 }
 
-; check: function %yes_spill(i64 [%rdi], i64 [%rsi], i64 fp [%rbp], i64 csr [%rbx], i64 csr [%r12], i64 csr [%r13], i64 csr [%r14], i64 csr [%r15]) -> i64 fp [%rbp], i64 csr [%rbx], i64 csr [%r12], i64 csr [%r13], i64 csr [%r14], i64 csr [%r15] fast {
+; check: function @yes_spill(i64 [%rdi], i64 [%rsi], i64 fp [%rbp], i64 csr [%rbx], i64 csr [%r12], i64 csr [%r13], i64 csr [%r14], i64 csr [%r15]) -> i64 fp [%rbp], i64 csr [%rbx], i64 csr [%r12], i64 csr [%r13], i64 csr [%r14], i64 csr [%r15] fast {
 ; check:     ss0 = spill_slot
 
 ; check: ebb0(v16: i64 [%rdi], v17: i64 [%rsi], v48: i64 [%rbp], v49: i64 [%rbx], v50: i64 [%r12], v51: i64 [%r13], v52: i64 [%r14], v53: i64 [%r15]):
@@ -209,7 +209,7 @@ ebb0(v0: i64, v1: i64):
 
 ; A function which uses diverted registers.
 
-function %divert(i32) -> i32 system_v {
+function @divert(i32) -> i32 system_v {
 ebb0(v0: i32):
     v2 = iconst.i32 0
     v3 = iconst.i32 1
@@ -225,19 +225,19 @@ ebb4:
     return v5
 }
 
-; check: function %divert
+; check: function @divert
 ; check: regmove v5, %rcx -> %rbx
 ; check: [Op1popq#58,%rbx]                   v15 = x86_pop.i64
 
 ; Stack limit checking
 
-function %stack_limit(i64 stack_limit) {
+function @stack_limit(i64 stack_limit) {
     ss0 = explicit_slot 168
 ebb0(v0: i64):
     return
 }
 
-; check: function %stack_limit(i64 stack_limit [%rdi], i64 fp [%rbp]) -> i64 fp [%rbp] fast {
+; check: function @stack_limit(i64 stack_limit [%rdi], i64 fp [%rbp]) -> i64 fp [%rbp] fast {
 ; nextln:     ss0 = explicit_slot 168, offset -184
 ; nextln:     ss1 = incoming_arg 16, offset -16
 ; nextln: 

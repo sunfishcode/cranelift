@@ -3,8 +3,8 @@ target x86_64
 
 ; Test that fallthrough returns are visited by reload and coloring.
 
-function %foo() -> f64 {
-  fn0 = %bar()
+function @foo() -> f64 {
+  fn0 = @bar()
 
 ebb0:
   v0 = f64const 0.0
@@ -13,8 +13,8 @@ ebb0:
 }
 ; check: fill v0
 
-function %foo() -> f64 {
-  fn0 = %bar() -> f64, f64
+function @foo() -> f64 {
+  fn0 = @bar() -> f64, f64
 
 ebb0:
   v0, v1 = call fn0()

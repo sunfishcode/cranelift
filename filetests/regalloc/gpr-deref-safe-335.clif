@@ -1,7 +1,7 @@
 test regalloc
 target x86_64
 
-function u0:587() fast {
+function @[0:587]() fast {
 ebb0:
     v97 = iconst.i32 0
     v169 = iconst.i32 0

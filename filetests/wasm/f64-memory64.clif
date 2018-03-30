@@ -5,7 +5,7 @@ test compile
 ; explicitly mention the pointer width.
 target x86_64 haswell
 
-function %f64_load(i32, i64 vmctx) -> f64 {
+function @f64_load(i32, i64 vmctx) -> f64 {
     gv0 = vmctx
     heap0 = static gv0, min 0x0001_0000, bound 0x0001_0000_0000, guard 0x8000_0000
 
@@ -15,7 +15,7 @@ ebb0(v0: i32, v1: i64):
     return v3
 }
 
-function %f64_store(f64, i32, i64 vmctx) {
+function @f64_store(f64, i32, i64 vmctx) {
     gv0 = vmctx
     heap0 = static gv0, min 0x0001_0000, bound 0x0001_0000_0000, guard 0x8000_0000
 

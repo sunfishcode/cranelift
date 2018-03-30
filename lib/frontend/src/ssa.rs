@@ -1004,7 +1004,7 @@ mod tests {
         //
         // Here is the pseudo-program we want to translate:
         //
-        // function %f {
+        // function @f {
         // jt = jump_table [ebb2, ebb1]
         // ebb0:
         //    x = 1;

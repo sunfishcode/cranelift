@@ -3,7 +3,7 @@ target riscv32
 
 ; The loop in this function is entered from a critical edge.
 
-function %critical_edge(i32, i32) -> i32 {
+function @critical_edge(i32, i32) -> i32 {
 
             ebb0(v0: i32, v7: i32):
 [SBzero#38]   brnz v7, ebb1(v0)
@@ -21,7 +21,7 @@ function %critical_edge(i32, i32) -> i32 {
 [Iret#19]     return v6
 
 }
-; sameln: function %critical_edge
+; sameln: function @critical_edge
 ; nextln: ebb0(v0: i32, v7: i32):
 ; nextln:     brnz v7, ebb3(v0)
 ; nextln:     return v0

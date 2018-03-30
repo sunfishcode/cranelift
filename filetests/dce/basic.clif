@@ -1,18 +1,18 @@
 test dce
 
-function %simple() -> i32 {
+function @simple() -> i32 {
 ebb0:
     v2 = iconst.i32 2
     v3 = iconst.i32 3
     return v3
 }
-; sameln: function %simple
+; sameln: function @simple
 ; nextln: ebb0:
 ; nextln:     v3 = iconst.i32 3
 ; nextln:     return v3
 ; nextln: }
 
-function %some_branching(i32, i32) -> i32 {
+function @some_branching(i32, i32) -> i32 {
 ebb0(v0: i32, v1: i32):
     v3 = iconst.i32 70
     v4 = iconst.i32 71
@@ -30,7 +30,7 @@ ebb2(v9: i32):
     v7 = iadd v6, v9
     return v7
 }
-; sameln: function %some_branching
+; sameln: function @some_branching
 ; nextln: ebb0(v0: i32, v1: i32):
 ; nextln:     v4 = iconst.i32 71
 ; nextln:     v8 = iconst.i32 73

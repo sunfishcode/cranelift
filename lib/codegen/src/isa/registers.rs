@@ -76,6 +76,10 @@ impl RegBank {
 
     /// Try to parse a regunit name. The name is not expected to begin with `%`.
     fn parse_regunit(&self, name: &str) -> Option<RegUnit> {
+        if !name.starts_with('%') {
+            return None;
+        }
+        let name = &name[1..];
         match self.names.iter().position(|&x| x == name) {
             Some(offset) => {
                 // This is one of the special-cased names.
@@ -281,7 +285,7 @@ impl RegInfo {
         self.banks.iter().find(|b| b.contains(regunit))
     }
 
-    /// Try to parse a regunit name. The name is not expected to begin with `%`.
+    /// Try to parse a regunit name. The name is expected to begin with `%`.
     pub fn parse_regunit(&self, name: &str) -> Option<RegUnit> {
         self.banks
             .iter()

@@ -12,11 +12,11 @@ mod tests {
 
     #[test]
     fn unit_encodings() {
-        assert_eq!(INFO.parse_regunit("s0"), Some(0));
-        assert_eq!(INFO.parse_regunit("s31"), Some(31));
-        assert_eq!(INFO.parse_regunit("s32"), Some(32));
-        assert_eq!(INFO.parse_regunit("r0"), Some(64));
-        assert_eq!(INFO.parse_regunit("r15"), Some(79));
+        assert_eq!(INFO.parse_regunit("%s0"), Some(0));
+        assert_eq!(INFO.parse_regunit("%s31"), Some(31));
+        assert_eq!(INFO.parse_regunit("%s32"), Some(32));
+        assert_eq!(INFO.parse_regunit("%r0"), Some(64));
+        assert_eq!(INFO.parse_regunit("%r15"), Some(79));
     }
 
     #[test]

@@ -164,7 +164,7 @@ impl<'a> Context<'a> {
         self.map.def_gv(gv, loc)?;
         while self.function.global_values.next_key().index() <= gv.index() {
             self.function.create_global_value(GlobalValueData::Symbol {
-                name: ExternalName::testcase(""),
+                name: ExternalName::DefaultName,
                 offset: Imm64::new(0),
                 colocated: false,
             });
@@ -258,7 +258,7 @@ impl<'a> Context<'a> {
         self.map.def_fn(fn_, loc)?;
         while self.function.dfg.ext_funcs.next_key().index() <= fn_.index() {
             self.function.import_function(ExtFuncData {
-                name: ExternalName::testcase(""),
+                name: ExternalName::DefaultName,
                 signature: SigRef::reserved_value(),
                 colocated: false,
             });
@@ -706,7 +706,8 @@ impl<'a> Parser<'a> {
 
     // Match and consume a register unit either by number `%15` or by name `%rax`.
     fn match_regunit(&mut self, isa: Option<&TargetIsa>) -> ParseResult<RegUnit> {
-        if let Some(Token::Name(name)) = self.token() {
+        if let Some(Token::RegName(name)) = self.token() {
+            debug_assert!(name.starts_with('%'));
             self.consume();
             match isa {
                 Some(isa) => isa
@@ -714,6 +715,8 @@ impl<'a> Parser<'a> {
                     .parse_regunit(name)
                     .ok_or_else(|| self.error("invalid register name")),
                 None => name
+                    .split_at(1)
+                    .1
                     .parse()
                     .map_err(|_| self.error("invalid register number")),
             }
@@ -956,27 +959,7 @@ impl<'a> Parser<'a> {
             Some(Token::Name(s)) => {
                 self.consume();
                 s.parse()
-                    .map_err(|_| self.error("invalid test case or libcall name"))
-            }
-            Some(Token::UserRef(namespace)) => {
-                self.consume();
-                match self.token() {
-                    Some(Token::Colon) => {
-                        self.consume();
-                        match self.token() {
-                            Some(Token::Integer(index_str)) => {
-                                let index: u32 =
-                                    u32::from_str_radix(index_str, 10).map_err(|_| {
-                                        self.error("the integer given overflows the u32 type")
-                                    })?;
-                                self.consume();
-                                Ok(ExternalName::user(namespace, index))
-                            }
-                            _ => err!(self.loc, "expected integer"),
-                        }
-                    }
-                    _ => err!(self.loc, "expected colon"),
-                }
+                    .map_err(|_| self.error(&format!("invalid external name: {}", s)))
             }
             _ => err!(self.loc, "expected external name"),
         }
@@ -1071,7 +1054,7 @@ impl<'a> Parser<'a> {
         // argumentloc ::= '[' regname | uimm32 ']'
         if self.optional(Token::LBracket) {
             let result = match self.token() {
-                Some(Token::Name(name)) => {
+                Some(Token::RegName(name)) => {
                     self.consume();
                     if let Some(isa) = unique_isa {
                         isa.register_info()
@@ -1704,7 +1687,7 @@ impl<'a> Parser<'a> {
                 ctx.check_ss(ss, self.loc)?;
                 Ok(ValueLoc::Stack(ss))
             }
-            Some(Token::Name(name)) => {
+            Some(Token::RegName(name)) => {
                 self.consume();
                 if let Some(isa) = ctx.unique_isa {
                     isa.register_info()
@@ -1747,7 +1730,7 @@ impl<'a> Parser<'a> {
             }
 
             // result_locations ::= ("," ( "-" | names ) )?
-            // names ::= Name { "," Name }
+            // names ::= RegName { "," RegName }
             if self.optional(Token::Comma) {
                 let mut results = Vec::new();
 
@@ -2581,7 +2564,7 @@ mod tests {
     #[test]
     fn aliases() {
         let (func, details) = Parser::new(
-            "function %qux() system_v {
+            "function @qux() system_v {
                                            ebb0:
                                              v4 = iconst.i8 6
                                              v3 -> v4
@@ -2589,7 +2572,7 @@ mod tests {
                                            }",
         ).parse_function(None)
         .unwrap();
-        assert_eq!(func.name.to_string(), "%qux");
+        assert_eq!(func.name.to_string(), "@qux");
         let v4 = details.map.lookup_str("v4").unwrap();
         assert_eq!(v4.to_string(), "v4");
         let v3 = details.map.lookup_str("v3").unwrap();
@@ -2659,13 +2642,13 @@ mod tests {
     #[test]
     fn stack_slot_decl() {
         let (func, _) = Parser::new(
-            "function %foo() system_v {
+            "function @foo() system_v {
                                        ss3 = incoming_arg 13
                                        ss1 = spill_slot 1
                                      }",
         ).parse_function(None)
         .unwrap();
-        assert_eq!(func.name.to_string(), "%foo");
+        assert_eq!(func.name.to_string(), "@foo");
         let mut iter = func.stack_slots.keys();
         let _ss0 = iter.next().unwrap();
         let ss1 = iter.next().unwrap();
@@ -2682,7 +2665,7 @@ mod tests {
         // Catch duplicate definitions.
         assert_eq!(
             Parser::new(
-                "function %bar() system_v {
+                "function @bar() system_v {
                                     ss1  = spill_slot 13
                                     ss1  = spill_slot 1
                                 }",
@@ -2696,13 +2679,13 @@ mod tests {
     #[test]
     fn ebb_header() {
         let (func, _) = Parser::new(
-            "function %ebbs() system_v {
+            "function @ebbs() system_v {
                                      ebb0:
                                      ebb4(v3: i32):
                                      }",
         ).parse_function(None)
         .unwrap();
-        assert_eq!(func.name.to_string(), "%ebbs");
+        assert_eq!(func.name.to_string(), "@ebbs");
 
         let mut ebbs = func.layout.ebbs();
 
@@ -2718,7 +2701,7 @@ mod tests {
     #[test]
     fn duplicate_ebb() {
         let ParseError { location, message } = Parser::new(
-            "function %ebbs() system_v {
+            "function @ebbs() system_v {
                 ebb0:
                 ebb0:
                     return 2",
@@ -2732,7 +2715,7 @@ mod tests {
     #[test]
     fn duplicate_jt() {
         let ParseError { location, message } = Parser::new(
-            "function %ebbs() system_v {
+            "function @ebbs() system_v {
                 jt0 = jump_table []
                 jt0 = jump_table []",
         ).parse_function(None)
@@ -2745,7 +2728,7 @@ mod tests {
     #[test]
     fn duplicate_ss() {
         let ParseError { location, message } = Parser::new(
-            "function %ebbs() system_v {
+            "function @ebbs() system_v {
                 ss0 = explicit_slot 8
                 ss0 = explicit_slot 8",
         ).parse_function(None)
@@ -2758,7 +2741,7 @@ mod tests {
     #[test]
     fn duplicate_gv() {
         let ParseError { location, message } = Parser::new(
-            "function %ebbs() system_v {
+            "function @ebbs() system_v {
                 gv0 = vmctx
                 gv0 = vmctx",
         ).parse_function(None)
@@ -2771,7 +2754,7 @@ mod tests {
     #[test]
     fn duplicate_heap() {
         let ParseError { location, message } = Parser::new(
-            "function %ebbs() system_v {
+            "function @ebbs() system_v {
                 heap0 = static gv0, min 0x1000, bound 0x10_0000, guard 0x1000
                 heap0 = static gv0, min 0x1000, bound 0x10_0000, guard 0x1000",
         ).parse_function(None)
@@ -2784,7 +2767,7 @@ mod tests {
     #[test]
     fn duplicate_sig() {
         let ParseError { location, message } = Parser::new(
-            "function %ebbs() system_v {
+            "function @ebbs() system_v {
                 sig0 = ()
                 sig0 = ()",
         ).parse_function(None)
@@ -2797,10 +2780,10 @@ mod tests {
     #[test]
     fn duplicate_fn() {
         let ParseError { location, message } = Parser::new(
-            "function %ebbs() system_v {
+            "function @ebbs() system_v {
                 sig0 = ()
-                fn0 = %foo sig0
-                fn0 = %foo sig0",
+                fn0 = @foo sig0
+                fn0 = @foo sig0",
         ).parse_function(None)
         .unwrap_err();
 
@@ -2812,7 +2795,7 @@ mod tests {
     fn comments() {
         let (func, Details { comments, .. }) = Parser::new(
             "; before
-                         function %comment() system_v { ; decl
+                         function @comment() system_v { ; decl
                             ss10  = outgoing_arg 13 ; stackslot.
                             ; Still stackslot.
                             jt10 = jump_table [ebb0]
@@ -2823,7 +2806,7 @@ mod tests {
                          ; More trailing.",
         ).parse_function(None)
         .unwrap();
-        assert_eq!(func.name.to_string(), "%comment");
+        assert_eq!(func.name.to_string(), "@comment");
         assert_eq!(comments.len(), 8); // no 'before' comment.
         assert_eq!(
             comments[0],
@@ -2855,7 +2838,7 @@ mod tests {
                              test verify
                              set enable_float=false
                              ; still preamble
-                             function %comment() system_v {}",
+                             function @comment() system_v {}",
             None,
             None,
         ).unwrap();
@@ -2873,7 +2856,7 @@ mod tests {
         assert_eq!(tf.preamble_comments[0].text, "; before");
         assert_eq!(tf.preamble_comments[1].text, "; still preamble");
         assert_eq!(tf.functions.len(), 1);
-        assert_eq!(tf.functions[0].0.name.to_string(), "%comment");
+        assert_eq!(tf.functions[0].0.name.to_string(), "@comment");
     }
 
     #[test]
@@ -2882,7 +2865,7 @@ mod tests {
         assert!(
             parse_test(
                 "target
-                            function %foo() system_v {}",
+                            function @foo() system_v {}",
             ).is_err()
         );
 
@@ -2890,14 +2873,14 @@ mod tests {
             parse_test(
                 "target riscv32
                             set enable_float=false
-                            function %foo() system_v {}",
+                            function @foo() system_v {}",
             ).is_err()
         );
 
         match parse_test(
             "set enable_float=false
                           isa riscv
-                          function %foo() system_v {}",
+                          function @foo() system_v {}",
         ).unwrap()
         .isa_spec
         {
@@ -2910,21 +2893,33 @@ mod tests {
     }
 
     #[test]
-    fn user_function_name() {
+    fn valid_user_function_name() {
         // Valid characters in the name:
         let func = Parser::new(
-            "function u1:2() system_v {
+            "function @[1:2]() system_v {
                                            ebb0:
                                              trap int_divz
                                            }",
         ).parse_function(None)
         .unwrap()
         .0;
-        assert_eq!(func.name.to_string(), "u1:2");
+        assert_eq!(func.name.to_string(), "@[1:2]");
+    }
+
+    #[test]
+    fn invalid_user_function_name() {
+        // Invalid characters in the name:
+        let mut parser = Parser::new(
+            "function @123:abc() system_v {
+                                           ebb0:
+                                             trap stk_ovf
+                                           }",
+        );
+        assert!(parser.parse_function(None).is_err());
 
         // Invalid characters in the name:
         let mut parser = Parser::new(
-            "function u123:abc() system_v {
+            "function @[123:abc]() system_v {
                                            ebb0:
                                              trap stk_ovf
                                            }",
@@ -2933,7 +2928,7 @@ mod tests {
 
         // Incomplete function names should not be valid:
         let mut parser = Parser::new(
-            "function u() system_v {
+            "function @() system_v {
                                            ebb0:
                                              trap int_ovf
                                            }",
@@ -2941,7 +2936,7 @@ mod tests {
         assert!(parser.parse_function(None).is_err());
 
         let mut parser = Parser::new(
-            "function u0() system_v {
+            "function @[]() system_v {
                                            ebb0:
                                              trap int_ovf
                                            }",
@@ -2949,7 +2944,47 @@ mod tests {
         assert!(parser.parse_function(None).is_err());
 
         let mut parser = Parser::new(
-            "function u0:() system_v {
+            "function @[:]() system_v {
+                                           ebb0:
+                                             trap int_ovf
+                                           }",
+        );
+        assert!(parser.parse_function(None).is_err());
+
+        let mut parser = Parser::new(
+            "function @[0:]() system_v {
+                                           ebb0:
+                                             trap int_ovf
+                                           }",
+        );
+        assert!(parser.parse_function(None).is_err());
+
+        let mut parser = Parser::new(
+            "function @[:0]() system_v {
+                                           ebb0:
+                                             trap int_ovf
+                                           }",
+        );
+        assert!(parser.parse_function(None).is_err());
+
+        let mut parser = Parser::new(
+            "function @:0() system_v {
+                                           ebb0:
+                                             trap int_ovf
+                                           }",
+        );
+        assert!(parser.parse_function(None).is_err());
+
+        let mut parser = Parser::new(
+            "function @0:() system_v {
+                                           ebb0:
+                                             trap int_ovf
+                                           }",
+        );
+        assert!(parser.parse_function(None).is_err());
+
+        let mut parser = Parser::new(
+            "function @0:0() system_v {
                                            ebb0:
                                              trap int_ovf
                                            }",

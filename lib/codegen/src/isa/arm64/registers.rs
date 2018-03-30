@@ -12,13 +12,13 @@ mod tests {
 
     #[test]
     fn unit_encodings() {
-        assert_eq!(INFO.parse_regunit("x0"), Some(0));
-        assert_eq!(INFO.parse_regunit("x31"), Some(31));
-        assert_eq!(INFO.parse_regunit("v0"), Some(32));
-        assert_eq!(INFO.parse_regunit("v31"), Some(63));
+        assert_eq!(INFO.parse_regunit("%x0"), Some(0));
+        assert_eq!(INFO.parse_regunit("%x31"), Some(31));
+        assert_eq!(INFO.parse_regunit("%v0"), Some(32));
+        assert_eq!(INFO.parse_regunit("%v31"), Some(63));
 
-        assert_eq!(INFO.parse_regunit("x32"), None);
-        assert_eq!(INFO.parse_regunit("v32"), None);
+        assert_eq!(INFO.parse_regunit("%x32"), None);
+        assert_eq!(INFO.parse_regunit("%v32"), None);
     }
 
     #[test]

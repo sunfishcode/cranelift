@@ -2,14 +2,14 @@ test compile
 
 target x86_64
 
-function u0:0(i64, i64, i64) system_v {
+function @[0:0](i64, i64, i64) system_v {
     ss0 = explicit_slot 0
     ss1 = explicit_slot 8
     ss2 = explicit_slot 8
     ss3 = explicit_slot 2
     ss4 = explicit_slot 8
     sig0 = (i64, i16, i64) system_v
-    fn0 = colocated u0:11 sig0
+    fn0 = colocated @[0:11] sig0
 
 ebb0(v0: i64, v1: i64, v2: i64):
     v3 = stack_addr.i64 ss1

@@ -133,9 +133,9 @@ Iret = EncRecipe(
         // The return address is provided as a special-purpose link argument.
         put_i(
             bits,
-            1, // rs1 = %x1
+            1, // rs1 = @x1
             0, // no offset.
-            0, // rd = %x0: no address written.
+            0, // rd = @x0: no address written.
             sink,
         );
         ''')
@@ -149,7 +149,7 @@ Icall = EncRecipe(
             bits,
             in_reg0,
             0, // no offset.
-            1, // rd = %x1: link register.
+            1, // rd = @x1: link register.
             sink,
         );
         ''')

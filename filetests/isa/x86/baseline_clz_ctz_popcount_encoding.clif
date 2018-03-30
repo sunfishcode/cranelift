@@ -7,7 +7,7 @@ target x86_64 baseline
 ;   sed -ne 's/^ *; asm: *//p' filetests/isa/x86/baseline_clz_ctz_popcount_encoding.clif | llvm-mc -show-encoding -triple=x86_64
 ;
 
-function %Foo() {
+function @Foo() {
 ebb0:
     ; 64-bit wide bsf
 

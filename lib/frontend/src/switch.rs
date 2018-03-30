@@ -222,7 +222,7 @@ mod tests {
             }
             func
                 .to_string()
-                .trim_left_matches("function u0:0() fast {\n")
+                .trim_left_matches("function @-() fast {\n")
                 .trim_right_matches("\n}\n")
                 .to_string()
         }};

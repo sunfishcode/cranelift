@@ -3,7 +3,7 @@ target x86_64
 
 ; Test legalization for various forms of table addresses.
 
-function %table_addrs(i32, i64, i64 vmctx) {
+function @table_addrs(i32, i64, i64 vmctx) {
     gv4 = vmctx
     gv0 = iadd_imm.i64 gv4, 72
     gv1 = iadd_imm.i64 gv4, 80

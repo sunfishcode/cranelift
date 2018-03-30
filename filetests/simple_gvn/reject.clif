@@ -1,6 +1,6 @@
 test simple-gvn
 
-function %other_side_effects(i32) -> i32 {
+function @other_side_effects(i32) -> i32 {
 ebb0(v0: i32):
    regmove v0, %10 -> %20
    regmove v0, %10 -> %20
@@ -10,7 +10,7 @@ ebb0(v0: i32):
     return v0
 }
 
-function %differing_typevars() -> i64 {
+function @differing_typevars() -> i64 {
 ebb0:
     v0 = iconst.i32 7
     v1 = iconst.i64 7
@@ -24,7 +24,7 @@ ebb0:
     return v5
 }
 
-function %cpu_flags() -> b1 {
+function @cpu_flags() -> b1 {
 ebb0:
     v0 = iconst.i32 7
     v1 = iconst.i32 8
@@ -40,7 +40,7 @@ ebb0:
     return v6
 }
 
-function %spill() -> i32 {
+function @spill() -> i32 {
 ebb0:
     v0 = iconst.i32 7
     v1 = spill v0
