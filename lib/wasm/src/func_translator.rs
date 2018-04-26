@@ -1,38 +1,34 @@
-//! Stand-alone WebAssembly to Cretonne IL translator.
+//! Stand-alone WebAssembly to Cretonne IR translator.
 //!
 //! This module defines the `FuncTranslator` type which can translate a single WebAssembly
-//! function to Cretonne IL guided by a `FuncEnvironment` which provides information about the
+//! function to Cretonne IR guided by a `FuncEnvironment` which provides information about the
 //! WebAssembly module and the runtime environment.
 
 use code_translator::translate_operator;
-use cretonne::entity::EntityRef;
-use cretonne::ir::{self, InstBuilder};
-use cretonne::result::{CtonResult, CtonError};
-use cton_frontend::{ILBuilder, FunctionBuilder};
-use runtime::FuncEnvironment;
+use cretonne_codegen::entity::EntityRef;
+use cretonne_codegen::ir::{self, Ebb, InstBuilder};
+use cretonne_codegen::result::{CtonError, CtonResult};
+use cretonne_codegen::timing;
+use cretonne_frontend::{FunctionBuilder, FunctionBuilderContext, Variable};
+use environ::FuncEnvironment;
 use state::TranslationState;
-use translation_utils::Local;
 use wasmparser::{self, BinaryReader};
 
-/// Maximum number of local variables permitted in a function. The translation fails with a
-/// `CtonError::ImplLimitExceeded` error if the limit is exceeded.
-const MAX_LOCALS: usize = 50_000;
-
-/// WebAssembly to Cretonne IL function translator.
+/// WebAssembly to Cretonne IR function translator.
 ///
-/// A `FuncTranslator` is used to translate a binary WebAssembly function into Cretonne IL guided
+/// A `FuncTranslator` is used to translate a binary WebAssembly function into Cretonne IR guided
 /// by a `FuncEnvironment` object. A single translator instance can be reused to translate multiple
 /// functions which will reduce heap allocation traffic.
 pub struct FuncTranslator {
-    il_builder: ILBuilder<Local>,
+    func_ctx: FunctionBuilderContext<Variable>,
     state: TranslationState,
 }
 
 impl FuncTranslator {
     /// Create a new translator.
-    pub fn new() -> FuncTranslator {
-        FuncTranslator {
-            il_builder: ILBuilder::new(),
+    pub fn new() -> Self {
+        Self {
+            func_ctx: FunctionBuilderContext::new(),
             state: TranslationState::new(),
         }
     }
@@ -46,8 +42,9 @@ impl FuncTranslator {
     /// - The declaration of *locals*, and
     /// - The function *body* as an expression.
     ///
-    /// See [the WebAssembly specification]
-    /// (http://webassembly.github.io/spec/binary/modules.html#code-section).
+    /// See [the WebAssembly specification][wasm].
+    ///
+    /// [wasm]: https://webassembly.github.io/spec/binary/modules.html#code-section
     ///
     /// The Cretonne IR function `func` should be completely empty except for the `func.signature`
     /// and `func.name` fields. The signature may contain special-purpose arguments which are not
@@ -70,50 +67,60 @@ impl FuncTranslator {
         func: &mut ir::Function,
         environ: &mut FE,
     ) -> CtonResult {
+        let _tt = timing::wasm_translate_function();
         dbg!(
             "translate({} bytes, {}{})",
             reader.bytes_remaining(),
             func.name,
             func.signature
         );
-        assert_eq!(func.dfg.num_ebbs(), 0, "Function must be empty");
-        assert_eq!(func.dfg.num_insts(), 0, "Function must be empty");
+        debug_assert_eq!(func.dfg.num_ebbs(), 0, "Function must be empty");
+        debug_assert_eq!(func.dfg.num_insts(), 0, "Function must be empty");
 
-        // This clears the `ILBuilder`.
-        let builder = &mut FunctionBuilder::new(func, &mut self.il_builder);
+        // This clears the `FunctionBuilderContext`.
+        let mut builder = FunctionBuilder::new(func, &mut self.func_ctx);
         let entry_block = builder.create_ebb();
-        builder.switch_to_block(entry_block, &[]); // This also creates values for the arguments.
+        builder.append_ebb_params_for_function_params(entry_block);
+        builder.switch_to_block(entry_block); // This also creates values for the arguments.
         builder.seal_block(entry_block);
-        let num_args = declare_wasm_arguments(builder);
+        // Make sure the entry block is inserted in the layout before we make any callbacks to
+        // `environ`. The callback functions may need to insert things in the entry block.
+        builder.ensure_inserted_ebb();
+
+        let num_params = declare_wasm_parameters(&mut builder, entry_block);
 
         // Set up the translation state with a single pushed control block representing the whole
         // function and its return values.
         let exit_block = builder.create_ebb();
+        builder.append_ebb_params_for_function_returns(exit_block);
         self.state.initialize(&builder.func.signature, exit_block);
 
-        parse_local_decls(&mut reader, builder, num_args)?;
-        parse_function_body(reader, builder, &mut self.state, environ)
+        parse_local_decls(&mut reader, &mut builder, num_params)?;
+        parse_function_body(reader, &mut builder, &mut self.state, environ)?;
+
+        builder.finalize();
+        Ok(())
     }
 }
 
-/// Declare local variables for the signature arguments that correspond to WebAssembly locals.
+/// Declare local variables for the signature parameters that correspond to WebAssembly locals.
 ///
 /// Return the number of local variables declared.
-fn declare_wasm_arguments(builder: &mut FunctionBuilder<Local>) -> usize {
-    let sig_len = builder.func.signature.argument_types.len();
+fn declare_wasm_parameters(builder: &mut FunctionBuilder<Variable>, entry_block: Ebb) -> usize {
+    let sig_len = builder.func.signature.params.len();
     let mut next_local = 0;
     for i in 0..sig_len {
-        let arg_type = builder.func.signature.argument_types[i];
-        // There may be additional special-purpose arguments following the normal WebAssembly
-        // signature arguments. For example, a `vmctx` pointer.
-        if arg_type.purpose == ir::ArgumentPurpose::Normal {
-            // This is a normal WebAssembly signature argument, so create a local for it.
-            let local = Local::new(next_local);
-            builder.declare_var(local, arg_type.value_type);
+        let param_type = builder.func.signature.params[i];
+        // There may be additional special-purpose parameters following the normal WebAssembly
+        // signature parameters. For example, a `vmctx` pointer.
+        if param_type.purpose == ir::ArgumentPurpose::Normal {
+            // This is a normal WebAssembly signature parameter, so create a local for it.
+            let local = Variable::new(next_local);
+            builder.declare_var(local, param_type.value_type);
             next_local += 1;
 
-            let arg_value = builder.arg_value(i);
-            builder.def_var(local, arg_value);
+            let param_value = builder.ebb_params(entry_block)[i];
+            builder.def_var(local, param_value);
         }
     }
 
@@ -122,23 +129,24 @@ fn declare_wasm_arguments(builder: &mut FunctionBuilder<Local>) -> usize {
 
 /// Parse the local variable declarations that precede the function body.
 ///
-/// Declare local variables, starting from `num_args`.
+/// Declare local variables, starting from `num_params`.
 fn parse_local_decls(
     reader: &mut BinaryReader,
-    builder: &mut FunctionBuilder<Local>,
-    num_args: usize,
+    builder: &mut FunctionBuilder<Variable>,
+    num_params: usize,
 ) -> CtonResult {
-    let mut next_local = num_args;
+    let mut next_local = num_params;
     let local_count = reader.read_local_count().map_err(
         |_| CtonError::InvalidInput,
     )?;
 
     let mut locals_total = 0;
     for _ in 0..local_count {
+        builder.set_srcloc(cur_srcloc(reader));
         let (count, ty) = reader.read_local_decl(&mut locals_total).map_err(|_| {
             CtonError::InvalidInput
         })?;
-        declare_locals(builder, count, ty, &mut next_local)?;
+        declare_locals(builder, count, ty, &mut next_local);
     }
 
     Ok(())
@@ -148,11 +156,11 @@ fn parse_local_decls(
 ///
 /// Fail of too many locals are declared in the function, or if the type is not valid for a local.
 fn declare_locals(
-    builder: &mut FunctionBuilder<Local>,
+    builder: &mut FunctionBuilder<Variable>,
     count: u32,
     wasm_type: wasmparser::Type,
     next_local: &mut usize,
-) -> CtonResult {
+) {
     // All locals are initialized to 0.
     use wasmparser::Type::*;
     let zeroval = match wasm_type {
@@ -160,24 +168,16 @@ fn declare_locals(
         I64 => builder.ins().iconst(ir::types::I64, 0),
         F32 => builder.ins().f32const(ir::immediates::Ieee32::with_bits(0)),
         F64 => builder.ins().f64const(ir::immediates::Ieee64::with_bits(0)),
-        _ => return Err(CtonError::InvalidInput),
+        _ => panic!("invalid local type"),
     };
 
     let ty = builder.func.dfg.value_type(zeroval);
     for _ in 0..count {
-        // This implementation limit is arbitrary, but it ensures that a small function can't blow
-        // up the compiler by declaring millions of locals.
-        if *next_local >= MAX_LOCALS {
-            return Err(CtonError::ImplLimitExceeded);
-        }
-
-        let local = Local::new(*next_local);
+        let local = Variable::new(*next_local);
         builder.declare_var(local, ty);
         builder.def_var(local, zeroval);
         *next_local += 1;
     }
-
-    Ok(())
 }
 
 /// Parse the function body in `reader`.
@@ -186,17 +186,18 @@ fn declare_locals(
 /// arguments and locals are declared in the builder.
 fn parse_function_body<FE: FuncEnvironment + ?Sized>(
     mut reader: BinaryReader,
-    builder: &mut FunctionBuilder<Local>,
+    builder: &mut FunctionBuilder<Variable>,
     state: &mut TranslationState,
     environ: &mut FE,
 ) -> CtonResult {
     // The control stack is initialized with a single block representing the whole function.
-    assert_eq!(state.control_stack.len(), 1, "State not initialized");
+    debug_assert_eq!(state.control_stack.len(), 1, "State not initialized");
 
     // Keep going until the final `End` operator which pops the outermost block.
     while !state.control_stack.is_empty() {
+        builder.set_srcloc(cur_srcloc(&reader));
         let op = reader.read_operator().map_err(|_| CtonError::InvalidInput)?;
-        translate_operator(&op, builder, state, environ);
+        translate_operator(op, builder, state, environ);
     }
 
     // The final `End` operator left us in the exit block where we need to manually add a return
@@ -204,22 +205,37 @@ fn parse_function_body<FE: FuncEnvironment + ?Sized>(
     //
     // If the exit block is unreachable, it may not have the correct arguments, so we would
     // generate a return instruction that doesn't match the signature.
-    debug_assert!(builder.is_pristine());
-    if !builder.is_unreachable() {
-        builder.ins().return_(&state.stack);
+    if state.reachable {
+        debug_assert!(builder.is_pristine());
+        if !builder.is_unreachable() {
+            builder.ins().return_(&state.stack);
+        }
     }
+
+    // Discard any remaining values on the stack. Either we just returned them,
+    // or the end of the function is unreachable.
+    state.stack.clear();
 
     debug_assert!(reader.eof());
 
     Ok(())
 }
 
+/// Get the current source location from a reader.
+fn cur_srcloc(reader: &BinaryReader) -> ir::SourceLoc {
+    // We record source locations as byte code offsets relative to the beginning of the function.
+    // This will wrap around of a single function's byte code is larger than 4 GB, but a) the
+    // WebAssembly format doesn't allow for that, and b) that would hit other Cretonne
+    // implementation limits anyway.
+    ir::SourceLoc::new(reader.current_position() as u32)
+}
+
 #[cfg(test)]
 mod tests {
-    use cretonne::{ir, Context};
-    use cretonne::ir::types::I32;
-    use runtime::{DummyRuntime, FuncEnvironment};
     use super::FuncTranslator;
+    use cretonne_codegen::ir::types::I32;
+    use cretonne_codegen::{ir, Context};
+    use environ::{DummyEnvironment, FuncEnvironment};
 
     #[test]
     fn small1() {
@@ -237,20 +253,18 @@ mod tests {
         ];
 
         let mut trans = FuncTranslator::new();
-        let mut runtime = DummyRuntime::default();
+        let runtime = DummyEnvironment::default();
         let mut ctx = Context::new();
 
-        ctx.func.name = ir::FunctionName::new("small1");
-        ctx.func.signature.argument_types.push(
-            ir::ArgumentType::new(I32),
-        );
-        ctx.func.signature.return_types.push(
-            ir::ArgumentType::new(I32),
-        );
+        ctx.func.name = ir::ExternalName::testcase("small1");
+        ctx.func.signature.params.push(ir::AbiParam::new(I32));
+        ctx.func.signature.returns.push(ir::AbiParam::new(I32));
 
-        trans.translate(&BODY, &mut ctx.func, &mut runtime).unwrap();
+        trans
+            .translate(&BODY, &mut ctx.func, &mut runtime.func_env())
+            .unwrap();
         dbg!("{}", ctx.func.display(None));
-        ctx.verify(runtime.flags()).unwrap();
+        ctx.verify(runtime.func_env().flags()).unwrap();
     }
 
     #[test]
@@ -270,20 +284,18 @@ mod tests {
         ];
 
         let mut trans = FuncTranslator::new();
-        let mut runtime = DummyRuntime::default();
+        let runtime = DummyEnvironment::default();
         let mut ctx = Context::new();
 
-        ctx.func.name = ir::FunctionName::new("small2");
-        ctx.func.signature.argument_types.push(
-            ir::ArgumentType::new(I32),
-        );
-        ctx.func.signature.return_types.push(
-            ir::ArgumentType::new(I32),
-        );
+        ctx.func.name = ir::ExternalName::testcase("small2");
+        ctx.func.signature.params.push(ir::AbiParam::new(I32));
+        ctx.func.signature.returns.push(ir::AbiParam::new(I32));
 
-        trans.translate(&BODY, &mut ctx.func, &mut runtime).unwrap();
+        trans
+            .translate(&BODY, &mut ctx.func, &mut runtime.func_env())
+            .unwrap();
         dbg!("{}", ctx.func.display(None));
-        ctx.verify(runtime.flags()).unwrap();
+        ctx.verify(runtime.func_env().flags()).unwrap();
     }
 
     #[test]
@@ -312,16 +324,16 @@ mod tests {
         ];
 
         let mut trans = FuncTranslator::new();
-        let mut runtime = DummyRuntime::default();
+        let runtime = DummyEnvironment::default();
         let mut ctx = Context::new();
 
-        ctx.func.name = ir::FunctionName::new("infloop");
-        ctx.func.signature.return_types.push(
-            ir::ArgumentType::new(I32),
-        );
+        ctx.func.name = ir::ExternalName::testcase("infloop");
+        ctx.func.signature.returns.push(ir::AbiParam::new(I32));
 
-        trans.translate(&BODY, &mut ctx.func, &mut runtime).unwrap();
+        trans
+            .translate(&BODY, &mut ctx.func, &mut runtime.func_env())
+            .unwrap();
         dbg!("{}", ctx.func.display(None));
-        ctx.verify(runtime.flags()).unwrap();
+        ctx.verify(runtime.func_env().flags()).unwrap();
     }
 }

@@ -1,16 +1,12 @@
+//! Lexical analysis for .cton files.
 
-// ====--------------------------------------------------------------------------------------====//
-//
-// Lexical analysis for .cton files.
-//
-// ====--------------------------------------------------------------------------------------====//
-
+use cretonne_codegen::ir::types;
+use cretonne_codegen::ir::{Ebb, Value};
+use error::Location;
+#[allow(unused_imports)]
+use std::ascii::AsciiExt;
 use std::str::CharIndices;
 use std::u16;
-use std::ascii::AsciiExt;
-use cretonne::ir::types;
-use cretonne::ir::{Value, Ebb};
-use error::Location;
 
 /// A Token returned from the `Lexer`.
 ///
@@ -42,9 +38,11 @@ pub enum Token<'a> {
     JumpTable(u32), // jt2
     FuncRef(u32), // fn2
     SigRef(u32), // sig2
+    UserRef(u32), // u345
     Name(&'a str), // %9arbitrary_alphanum, %x3, %0, %function ...
     HexSequence(&'a str), // #89AF
     Identifier(&'a str), // Unrecognized identifier (opcode, enumerator, ...)
+    SourceLoc(&'a str), // @00c7
 }
 
 /// A `Token` with an associated location.
@@ -55,7 +53,7 @@ pub struct LocatedToken<'a> {
 }
 
 /// Wrap up a `Token` with the given location.
-fn token<'a>(token: Token<'a>, loc: Location) -> Result<LocatedToken<'a>, LocatedError> {
+fn token(token: Token, loc: Location) -> Result<LocatedToken, LocatedError> {
     Ok(LocatedToken {
         token,
         location: loc,
@@ -302,7 +300,11 @@ impl<'a> Lexer<'a> {
                         Self::value_type(text, prefix, number)
                     })
                 })
-                .unwrap_or(Token::Identifier(text)),
+                .unwrap_or_else(|| match text {
+                    "iflags" => Token::Type(types::IFLAGS),
+                    "fflags" => Token::Type(types::FFLAGS),
+                    _ => Token::Identifier(text),
+                }),
             loc,
         )
     }
@@ -319,6 +321,7 @@ impl<'a> Lexer<'a> {
             "jt" => Some(Token::JumpTable(number)),
             "fn" => Some(Token::FuncRef(number)),
             "sig" => Some(Token::SigRef(number)),
+            "u" => Some(Token::UserRef(number)),
             _ => None,
         }
     }
@@ -346,7 +349,7 @@ impl<'a> Lexer<'a> {
             _ => return None,
         };
         if is_vector {
-            if number <= u16::MAX as u32 {
+            if number <= u32::from(u16::MAX) {
                 base_type.by(number as u16).map(Token::Type)
             } else {
                 None
@@ -388,6 +391,22 @@ impl<'a> Lexer<'a> {
         token(Token::HexSequence(&self.source[begin..end]), loc)
     }
 
+    fn scan_srcloc(&mut self) -> Result<LocatedToken<'a>, LocatedError> {
+        let loc = self.loc();
+        let begin = self.pos + 1;
+
+        assert_eq!(self.lookahead, Some('@'));
+
+        while let Some(c) = self.next_ch() {
+            if !char::is_digit(c, 16) {
+                break;
+            }
+        }
+
+        let end = self.pos;
+        token(Token::SourceLoc(&self.source[begin..end]), loc)
+    }
+
     /// Get the next token or a lexical error.
     ///
     /// Return None when the end of the source is encountered.
@@ -419,6 +438,7 @@ impl<'a> Lexer<'a> {
                 Some(ch) if ch.is_alphabetic() => Some(self.scan_word()),
                 Some('%') => Some(self.scan_name()),
                 Some('#') => Some(self.scan_hex_sequence()),
+                Some('@') => Some(self.scan_srcloc()),
                 Some(ch) if ch.is_whitespace() => {
                     self.next_ch();
                     continue;
@@ -437,8 +457,8 @@ impl<'a> Lexer<'a> {
 mod tests {
     use super::trailing_digits;
     use super::*;
-    use cretonne::ir::types;
-    use cretonne::ir::{Value, Ebb};
+    use cretonne_codegen::ir::types;
+    use cretonne_codegen::ir::{Ebb, Value};
     use error::Location;
 
     #[test]
@@ -536,7 +556,8 @@ mod tests {
     fn lex_identifiers() {
         let mut lex = Lexer::new(
             "v0 v00 vx01 ebb1234567890 ebb5234567890 v1x vx1 vxvx4 \
-                                  function0 function b1 i32x4 f32x5",
+             function0 function b1 i32x4 f32x5 \
+             iflags fflags iflagss",
         );
         assert_eq!(
             lex.next(),
@@ -555,8 +576,11 @@ mod tests {
         assert_eq!(lex.next(), token(Token::Identifier("function0"), 1));
         assert_eq!(lex.next(), token(Token::Identifier("function"), 1));
         assert_eq!(lex.next(), token(Token::Type(types::B1), 1));
-        assert_eq!(lex.next(), token(Token::Type(types::I32.by(4).unwrap()), 1));
+        assert_eq!(lex.next(), token(Token::Type(types::I32X4), 1));
         assert_eq!(lex.next(), token(Token::Identifier("f32x5"), 1));
+        assert_eq!(lex.next(), token(Token::Type(types::IFLAGS), 1));
+        assert_eq!(lex.next(), token(Token::Type(types::FFLAGS), 1));
+        assert_eq!(lex.next(), token(Token::Identifier("iflagss"), 1));
         assert_eq!(lex.next(), None);
     }
 
@@ -581,5 +605,18 @@ mod tests {
         assert_eq!(lex.next(), token(Token::Name("v3"), 1));
         assert_eq!(lex.next(), token(Token::Name("ebb11"), 1));
         assert_eq!(lex.next(), token(Token::Name("_"), 1));
+    }
+
+    #[test]
+    fn lex_userrefs() {
+        let mut lex = Lexer::new("u0 u1 u234567890 u9:8765");
+
+        assert_eq!(lex.next(), token(Token::UserRef(0), 1));
+        assert_eq!(lex.next(), token(Token::UserRef(1), 1));
+        assert_eq!(lex.next(), token(Token::UserRef(234567890), 1));
+        assert_eq!(lex.next(), token(Token::UserRef(9), 1));
+        assert_eq!(lex.next(), token(Token::Colon, 1));
+        assert_eq!(lex.next(), token(Token::Integer("8765"), 1));
+        assert_eq!(lex.next(), None);
     }
 }

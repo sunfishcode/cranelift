@@ -1,19 +1,27 @@
 [package]
 name = "cretonne-wasm"
-version = "0.0.0"
+version = "0.6.0"
 authors = ["The Cretonne Project Developers"]
-publish = false
-description = "Translator from WebAssembly to Cretonne IL"
-repository = "https://github.com/stoklund/cretonne"
+description = "Translator from WebAssembly to Cretonne IR"
+repository = "https://github.com/cretonne/cretonne"
 license = "Apache-2.0"
-
-[lib]
-name = "cton_wasm"
+readme = "README.md"
+keywords = ["webassembly", "wasm"]
 
 [dependencies]
-wasmparser = "0.10.0"
-cretonne = { path = "../cretonne" }
-cretonne-frontend = { path = "../frontend" }
+wasmparser = { version = "0.16.1", default-features = false }
+cretonne-codegen = { path = "../codegen", version = "0.6.0", default-features = false }
+cretonne-frontend = { path = "../frontend", version = "0.6.0", default-features = false }
+hashmap_core = { version = "0.1.4", optional = true }
 
 [dev-dependencies]
 tempdir = "0.3.5"
+
+[features]
+default = ["std"]
+std = ["cretonne-codegen/std", "cretonne-frontend/std", "wasmparser/std"]
+core = ["hashmap_core", "cretonne-codegen/core", "cretonne-frontend/core", "wasmparser/core"]
+
+[badges]
+maintenance = { status = "experimental" }
+travis-ci = { repository = "cretonne/cretonne" }

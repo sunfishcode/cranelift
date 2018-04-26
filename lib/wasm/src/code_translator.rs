@@ -1,5 +1,5 @@
 //! This module contains the bulk of the interesting code performing the translation between
-//! WebAssembly and Cretonne IL.
+//! WebAssembly and Cretonne IR.
 //!
 //! The translation is done in one pass, opcode by opcode. Two main data structures are used during
 //! code translations: the value stack and the control stack. The value stack mimics the execution
@@ -11,7 +11,8 @@
 //! Another data structure, the translation state, records information concerning unreachable code
 //! status and about if inserting a return at the end of the function is necessary.
 //!
-//! Some of the WebAssembly instructions need information about the runtime to be translated:
+//! Some of the WebAssembly instructions need information about the environment for which they
+//! are being translated:
 //!
 //! - the loads and stores need the memory base address;
 //! - the `get_global` et `set_global` instructions depends on how the globals are implemented;
@@ -21,55 +22,62 @@
 //!
 //! That is why `translate_function_body` takes an object having the `WasmRuntime` trait as
 //! argument.
-use cretonne::ir::{self, InstBuilder, Ebb, MemFlags, JumpTableData};
-use cretonne::ir::types::*;
-use cretonne::ir::condcodes::{IntCC, FloatCC};
-use cton_frontend::FunctionBuilder;
-use wasmparser::{Operator, MemoryImmediate};
-use translation_utils::{f32_translation, f64_translation, type_to_type, translate_type, Local};
-use translation_utils::{TableIndex, SignatureIndex, FunctionIndex, MemoryIndex};
-use state::{TranslationState, ControlStackFrame};
-use std::collections::HashMap;
-use runtime::{FuncEnvironment, GlobalValue};
-use std::u32;
+use cretonne_codegen::ir::condcodes::{FloatCC, IntCC};
+use cretonne_codegen::ir::types::*;
+use cretonne_codegen::ir::{self, InstBuilder, JumpTableData, MemFlags};
+use cretonne_codegen::packed_option::ReservedValue;
+use cretonne_frontend::{FunctionBuilder, Variable};
+use environ::{FuncEnvironment, GlobalValue};
+use state::{ControlStackFrame, TranslationState};
+use std::collections::{hash_map, HashMap};
+use std::vec::Vec;
+use std::{i32, u32};
+use translation_utils::{FunctionIndex, MemoryIndex, SignatureIndex, TableIndex};
+use translation_utils::{num_return_values, type_to_type, f32_translation, f64_translation};
+use wasmparser::{MemoryImmediate, Operator};
 
-/// Translates wasm operators into Cretonne IL instructions. Returns `true` if it inserted
+// Clippy warns about "flags: _" but its important to document that the flags field is ignored
+#[cfg_attr(feature = "cargo-clippy", allow(unneeded_field_pattern))]
+/// Translates wasm operators into Cretonne IR instructions. Returns `true` if it inserted
 /// a return.
 pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
-    op: &Operator,
-    builder: &mut FunctionBuilder<Local>,
+    op: Operator,
+    builder: &mut FunctionBuilder<Variable>,
     state: &mut TranslationState,
     environ: &mut FE,
 ) {
-    if state.in_unreachable_code() {
-        return translate_unreachable_operator(op, builder, state);
+    if !state.reachable {
+        return translate_unreachable_operator(&op, builder, state);
     }
 
     // This big match treats all Wasm code operators.
-    match *op {
+    match op {
         /********************************** Locals ****************************************
          *  `get_local` and `set_local` are treated as non-SSA variables and will completely
-         *  diseappear in the Cretonne Code
+         *  disappear in the Cretonne Code
          ***********************************************************************************/
-        Operator::GetLocal { local_index } => state.push1(builder.use_var(Local(local_index))),
+        Operator::GetLocal { local_index } => {
+            state.push1(builder.use_var(Variable::with_u32(local_index)))
+        }
         Operator::SetLocal { local_index } => {
             let val = state.pop1();
-            builder.def_var(Local(local_index), val);
+            builder.def_var(Variable::with_u32(local_index), val);
         }
         Operator::TeeLocal { local_index } => {
             let val = state.peek1();
-            builder.def_var(Local(local_index), val);
+            builder.def_var(Variable::with_u32(local_index), val);
         }
         /********************************** Globals ****************************************
-         *  `get_global` and `set_global` are handled by the runtime.
+         *  `get_global` and `set_global` are handled by the environment.
          ***********************************************************************************/
         Operator::GetGlobal { global_index } => {
             let val = match state.get_global(builder.func, global_index, environ) {
                 GlobalValue::Const(val) => val,
                 GlobalValue::Memory { gv, ty } => {
                     let addr = builder.ins().global_addr(environ.native_pointer(), gv);
-                    // TODO: It is likely safe to set `aligned notrap` flags on a global load.
-                    let flags = ir::MemFlags::new();
+                    let mut flags = ir::MemFlags::new();
+                    flags.set_notrap();
+                    flags.set_aligned();
                     builder.ins().load(ty, flags, addr, 0)
                 }
             };
@@ -80,29 +88,32 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 GlobalValue::Const(_) => panic!("global #{} is a constant", global_index),
                 GlobalValue::Memory { gv, .. } => {
                     let addr = builder.ins().global_addr(environ.native_pointer(), gv);
-                    // TODO: It is likely safe to set `aligned notrap` flags on a global store.
-                    let flags = ir::MemFlags::new();
+                    let mut flags = ir::MemFlags::new();
+                    flags.set_notrap();
+                    flags.set_aligned();
                     let val = state.pop1();
                     builder.ins().store(flags, val, addr, 0);
                 }
             }
         }
         /********************************* Stack misc ***************************************
-         *  `drop`, `nop`,  `unreachable` and `select`.
+         *  `drop`, `nop`, `unreachable` and `select`.
          ***********************************************************************************/
         Operator::Drop => {
             state.pop1();
         }
         Operator::Select => {
             let (arg1, arg2, cond) = state.pop3();
-            state.push1(builder.ins().select(cond, arg2, arg1));
+            state.push1(builder.ins().select(cond, arg1, arg2));
         }
         Operator::Nop => {
             // We do nothing
         }
         Operator::Unreachable => {
-            builder.ins().trap();
-            state.real_unreachable_stack_depth = 1;
+            // We use `trap user0` to indicate a user-generated trap.
+            // We could make the trap code configurable if need be.
+            builder.ins().trap(ir::TrapCode::User(0));
+            state.reachable = false;
         }
         /***************************** Control flow blocks **********************************
          *  When starting a control flow block, we create a new `Ebb` that will hold the code
@@ -118,19 +129,20 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         Operator::Block { ty } => {
             let next = builder.create_ebb();
             if let Ok(ty_cre) = type_to_type(&ty) {
-                builder.append_ebb_arg(next, ty_cre);
+                builder.append_ebb_param(next, ty_cre);
             }
-            state.push_block(next, translate_type(ty).unwrap());
+            state.push_block(next, num_return_values(ty));
         }
         Operator::Loop { ty } => {
             let loop_body = builder.create_ebb();
             let next = builder.create_ebb();
             if let Ok(ty_cre) = type_to_type(&ty) {
-                builder.append_ebb_arg(next, ty_cre);
+                builder.append_ebb_param(next, ty_cre);
             }
             builder.ins().jump(loop_body, &[]);
-            state.push_loop(loop_body, next, translate_type(ty).unwrap());
-            builder.switch_to_block(loop_body, &[]);
+            state.push_loop(loop_body, next, num_return_values(ty));
+            builder.switch_to_block(loop_body);
+            environ.translate_loop_header(builder.cursor());
         }
         Operator::If { ty } => {
             let val = state.pop1();
@@ -143,52 +155,59 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             // - either the If have an Else clause, in that case the destination of this jump
             //   instruction will be changed later when we translate the Else operator.
             if let Ok(ty_cre) = type_to_type(&ty) {
-                builder.append_ebb_arg(if_not, ty_cre);
+                builder.append_ebb_param(if_not, ty_cre);
             }
-            state.push_if(jump_inst, if_not, translate_type(ty).unwrap());
+            state.push_if(jump_inst, if_not, num_return_values(ty));
         }
         Operator::Else => {
             // We take the control frame pushed by the if, use its ebb as the else body
             // and push a new control frame with a new ebb for the code after the if/then/else
             // At the end of the then clause we jump to the destination
             let i = state.control_stack.len() - 1;
-            let (destination, return_count, branch_inst) = match state.control_stack[i] {
-                ControlStackFrame::If {
-                    destination,
-                    ref return_values,
-                    branch_inst,
-                    ..
-                } => (destination, return_values.len(), branch_inst),
-                _ => panic!("should not happen"),
-            };
+            let (destination, return_count, branch_inst, ref mut reachable_from_top) =
+                match state.control_stack[i] {
+                    ControlStackFrame::If {
+                        destination,
+                        num_return_values,
+                        branch_inst,
+                        reachable_from_top,
+                        ..
+                    } => (
+                        destination,
+                        num_return_values,
+                        branch_inst,
+                        reachable_from_top,
+                    ),
+                    _ => panic!("should not happen"),
+                };
+            // The if has an else, so there's no branch to the end from the top.
+            *reachable_from_top = false;
             builder.ins().jump(destination, state.peekn(return_count));
             state.popn(return_count);
             // We change the target of the branch instruction
             let else_ebb = builder.create_ebb();
             builder.change_jump_destination(branch_inst, else_ebb);
             builder.seal_block(else_ebb);
-            builder.switch_to_block(else_ebb, &[]);
+            builder.switch_to_block(else_ebb);
         }
         Operator::End => {
             let frame = state.control_stack.pop().unwrap();
             if !builder.is_unreachable() || !builder.is_pristine() {
-                let return_count = frame.return_values().len();
+                let return_count = frame.num_return_values();
                 builder.ins().jump(
                     frame.following_code(),
                     state.peekn(return_count),
                 );
-                state.popn(return_count);
             }
-            builder.switch_to_block(frame.following_code(), frame.return_values());
+            builder.switch_to_block(frame.following_code());
             builder.seal_block(frame.following_code());
             // If it is a loop we also have to seal the body loop block
-            match frame {
-                ControlStackFrame::Loop { header, .. } => builder.seal_block(header),
-                _ => {}
+            if let ControlStackFrame::Loop { header, .. } = frame {
+                builder.seal_block(header)
             }
             state.stack.truncate(frame.original_stack_size());
             state.stack.extend_from_slice(
-                builder.ebb_args(frame.following_code()),
+                builder.ebb_params(frame.following_code()),
             );
         }
         /**************************** Branch instructions *********************************
@@ -217,11 +236,11 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let (return_count, br_destination) = {
                 let frame = &mut state.control_stack[i];
                 // We signal that all the code that follows until the next End is unreachable
-                frame.set_reachable();
+                frame.set_branched_to_exit();
                 let return_count = if frame.is_loop() {
                     0
                 } else {
-                    frame.return_values().len()
+                    frame.num_return_values()
                 };
                 (return_count, frame.br_destination())
             };
@@ -230,30 +249,10 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 state.peekn(return_count),
             );
             state.popn(return_count);
-            state.real_unreachable_stack_depth = 1 + relative_depth as usize;
+            state.reachable = false;
         }
-        Operator::BrIf { relative_depth } => {
-            let val = state.pop1();
-            let i = state.control_stack.len() - 1 - (relative_depth as usize);
-            let (return_count, br_destination) = {
-                let frame = &mut state.control_stack[i];
-                // The values returned by the branch are still available for the reachable
-                // code that comes after it
-                frame.set_reachable();
-                let return_count = if frame.is_loop() {
-                    0
-                } else {
-                    frame.return_values().len()
-                };
-                (return_count, frame.br_destination())
-            };
-            builder.ins().brnz(
-                val,
-                br_destination,
-                state.peekn(return_count),
-            );
-        }
-        Operator::BrTable { ref table } => {
+        Operator::BrIf { relative_depth } => translate_br_if(relative_depth, builder, state),
+        Operator::BrTable { table } => {
             let (depths, default) = table.read_table();
             let mut min_depth = default;
             for depth in &depths {
@@ -267,72 +266,77 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 if min_depth_frame.is_loop() {
                     0
                 } else {
-                    min_depth_frame.return_values().len()
+                    min_depth_frame.num_return_values()
                 }
             };
+            let val = state.pop1();
+            let mut data = JumpTableData::with_capacity(depths.len());
             if jump_args_count == 0 {
                 // No jump arguments
-                let val = state.pop1();
-                let mut data = JumpTableData::with_capacity(depths.len());
                 for depth in depths {
-                    let i = state.control_stack.len() - 1 - (depth as usize);
-                    let frame = &mut state.control_stack[i];
-                    let ebb = frame.br_destination();
+                    let ebb = {
+                        let i = state.control_stack.len() - 1 - (depth as usize);
+                        let frame = &mut state.control_stack[i];
+                        frame.set_branched_to_exit();
+                        frame.br_destination()
+                    };
                     data.push_entry(ebb);
-                    frame.set_reachable();
                 }
                 let jt = builder.create_jump_table(data);
                 builder.ins().br_table(val, jt);
-                let i = state.control_stack.len() - 1 - (default as usize);
-                let frame = &mut state.control_stack[i];
-                let ebb = frame.br_destination();
+                let ebb = {
+                    let i = state.control_stack.len() - 1 - (default as usize);
+                    let frame = &mut state.control_stack[i];
+                    frame.set_branched_to_exit();
+                    frame.br_destination()
+                };
                 builder.ins().jump(ebb, &[]);
-                state.real_unreachable_stack_depth = 1 + min_depth as usize;
-                frame.set_reachable();
             } else {
                 // Here we have jump arguments, but Cretonne's br_table doesn't support them
                 // We then proceed to split the edges going out of the br_table
-                let val = state.pop1();
                 let return_count = jump_args_count;
-                let mut data = JumpTableData::with_capacity(depths.len());
-                let dest_ebbs: HashMap<usize, Ebb> = depths.iter().fold(HashMap::new(), |mut acc,
-                 &depth| {
-                    if acc.get(&(depth as usize)).is_none() {
-                        let branch_ebb = builder.create_ebb();
-                        data.push_entry(branch_ebb);
-                        acc.insert(depth as usize, branch_ebb);
-                        return acc;
+                let mut dest_ebb_sequence = Vec::new();
+                let mut dest_ebb_map = HashMap::new();
+                for depth in depths {
+                    let branch_ebb = match dest_ebb_map.entry(depth as usize) {
+                        hash_map::Entry::Occupied(entry) => *entry.get(),
+                        hash_map::Entry::Vacant(entry) => {
+                            let ebb = builder.create_ebb();
+                            dest_ebb_sequence.push((depth as usize, ebb));
+                            *entry.insert(ebb)
+                        }
                     };
-                    let branch_ebb = acc[&(depth as usize)];
                     data.push_entry(branch_ebb);
-                    acc
-                });
+                }
                 let jt = builder.create_jump_table(data);
                 builder.ins().br_table(val, jt);
-                let default_ebb = state.control_stack[state.control_stack.len() - 1 -
-                                                          (default as usize)]
-                    .br_destination();
+                let default_ebb = {
+                    let i = state.control_stack.len() - 1 - (default as usize);
+                    let frame = &mut state.control_stack[i];
+                    frame.set_branched_to_exit();
+                    frame.br_destination()
+                };
                 builder.ins().jump(default_ebb, state.peekn(return_count));
-                for (depth, dest_ebb) in dest_ebbs {
-                    builder.switch_to_block(dest_ebb, &[]);
+                for (depth, dest_ebb) in dest_ebb_sequence {
+                    builder.switch_to_block(dest_ebb);
                     builder.seal_block(dest_ebb);
-                    let i = state.control_stack.len() - 1 - depth;
                     let real_dest_ebb = {
+                        let i = state.control_stack.len() - 1 - depth;
                         let frame = &mut state.control_stack[i];
-                        frame.set_reachable();
+                        frame.set_branched_to_exit();
                         frame.br_destination()
                     };
                     builder.ins().jump(real_dest_ebb, state.peekn(return_count));
                 }
                 state.popn(return_count);
-                state.real_unreachable_stack_depth = 1 + min_depth as usize;
             }
+            state.reachable = false;
         }
         Operator::Return => {
             let (return_count, br_destination) = {
                 let frame = &mut state.control_stack[0];
-                frame.set_reachable();
-                let return_count = frame.return_values().len();
+                frame.set_branched_to_exit();
+                let return_count = frame.num_return_values();
                 (return_count, frame.br_destination())
             };
             {
@@ -344,11 +348,11 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 }
             }
             state.popn(return_count);
-            state.real_unreachable_stack_depth = 1;
+            state.reachable = false;
         }
         /************************************ Calls ****************************************
          * The call instructions pop off their arguments from the stack and append their
-         * return values to it. `call_indirect` needs runtime support because there is an
+         * return values to it. `call_indirect` needs environment support because there is an
          * argument referring to an index in the external functions table of the module.
          ************************************************************************************/
         Operator::Call { function_index } => {
@@ -360,7 +364,7 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 state.peekn(num_args),
             );
             state.popn(num_args);
-            state.pushn(builder.func.dfg.inst_results(call));
+            state.pushn(builder.inst_results(call));
         }
         Operator::CallIndirect { index, table_index } => {
             // `index` is the index of the function's signature and `table_index` is the index of
@@ -376,10 +380,10 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
                 state.peekn(num_args),
             );
             state.popn(num_args);
-            state.pushn(builder.func.dfg.inst_results(call));
+            state.pushn(builder.inst_results(call));
         }
         /******************************* Memory management ***********************************
-         * Memory management is handled by runtime. It is usually translated into calls to
+         * Memory management is handled by environment. It is usually translated into calls to
          * special functions.
          ************************************************************************************/
         Operator::GrowMemory { reserved } => {
@@ -406,75 +410,75 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         }
         /******************************* Load instructions ***********************************
          * Wasm specifies an integer alignment flag but we drop it in Cretonne.
-         * The memory base address is provided by the runtime.
+         * The memory base address is provided by the environment.
          * TODO: differentiate between 32 bit and 64 bit architecture, to put the uextend or not
          ************************************************************************************/
-        Operator::I32Load8U { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::I32Load8U { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_load(offset, ir::Opcode::Uload8, I32, builder, state, environ);
         }
-        Operator::I32Load16U { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::I32Load16U { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_load(offset, ir::Opcode::Uload16, I32, builder, state, environ);
         }
-        Operator::I32Load8S { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::I32Load8S { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_load(offset, ir::Opcode::Sload8, I32, builder, state, environ);
         }
-        Operator::I32Load16S { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::I32Load16S { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_load(offset, ir::Opcode::Sload16, I32, builder, state, environ);
         }
-        Operator::I64Load8U { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::I64Load8U { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_load(offset, ir::Opcode::Uload8, I64, builder, state, environ);
         }
-        Operator::I64Load16U { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::I64Load16U { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_load(offset, ir::Opcode::Uload16, I64, builder, state, environ);
         }
-        Operator::I64Load8S { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::I64Load8S { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_load(offset, ir::Opcode::Sload8, I64, builder, state, environ);
         }
-        Operator::I64Load16S { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::I64Load16S { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_load(offset, ir::Opcode::Sload16, I64, builder, state, environ);
         }
-        Operator::I64Load32S { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::I64Load32S { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_load(offset, ir::Opcode::Sload32, I64, builder, state, environ);
         }
-        Operator::I64Load32U { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::I64Load32U { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_load(offset, ir::Opcode::Uload32, I64, builder, state, environ);
         }
-        Operator::I32Load { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::I32Load { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_load(offset, ir::Opcode::Load, I32, builder, state, environ);
         }
-        Operator::F32Load { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::F32Load { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_load(offset, ir::Opcode::Load, F32, builder, state, environ);
         }
-        Operator::I64Load { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::I64Load { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_load(offset, ir::Opcode::Load, I64, builder, state, environ);
         }
-        Operator::F64Load { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::F64Load { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_load(offset, ir::Opcode::Load, F64, builder, state, environ);
         }
         /****************************** Store instructions ***********************************
          * Wasm specifies an integer alignment flag but we drop it in Cretonne.
-         * The memory base address is provided by the runtime.
+         * The memory base address is provided by the environment.
          * TODO: differentiate between 32 bit and 64 bit architecture, to put the uextend or not
          ************************************************************************************/
-        Operator::I32Store { memory_immediate: MemoryImmediate { flags: _, offset } } |
-        Operator::I64Store { memory_immediate: MemoryImmediate { flags: _, offset } } |
-        Operator::F32Store { memory_immediate: MemoryImmediate { flags: _, offset } } |
-        Operator::F64Store { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::I32Store { memarg: MemoryImmediate { flags: _, offset } } |
+        Operator::I64Store { memarg: MemoryImmediate { flags: _, offset } } |
+        Operator::F32Store { memarg: MemoryImmediate { flags: _, offset } } |
+        Operator::F64Store { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_store(offset, ir::Opcode::Store, builder, state, environ);
         }
-        Operator::I32Store8 { memory_immediate: MemoryImmediate { flags: _, offset } } |
-        Operator::I64Store8 { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::I32Store8 { memarg: MemoryImmediate { flags: _, offset } } |
+        Operator::I64Store8 { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_store(offset, ir::Opcode::Istore8, builder, state, environ);
         }
-        Operator::I32Store16 { memory_immediate: MemoryImmediate { flags: _, offset } } |
-        Operator::I64Store16 { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::I32Store16 { memarg: MemoryImmediate { flags: _, offset } } |
+        Operator::I64Store16 { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_store(offset, ir::Opcode::Istore16, builder, state, environ);
         }
-        Operator::I64Store32 { memory_immediate: MemoryImmediate { flags: _, offset } } => {
+        Operator::I64Store32 { memarg: MemoryImmediate { flags: _, offset } } => {
             translate_store(offset, ir::Opcode::Istore32, builder, state, environ);
         }
         /****************************** Nullary Operators ************************************/
-        Operator::I32Const { value } => state.push1(builder.ins().iconst(I32, value as i64)),
+        Operator::I32Const { value } => state.push1(builder.ins().iconst(I32, i64::from(value))),
         Operator::I64Const { value } => state.push1(builder.ins().iconst(I64, value)),
         Operator::F32Const { value } => {
             state.push1(builder.ins().f32const(f32_translation(value)));
@@ -483,35 +487,18 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             state.push1(builder.ins().f64const(f64_translation(value)));
         }
         /******************************* Unary Operators *************************************/
-        Operator::I32Clz => {
+        Operator::I32Clz | Operator::I64Clz => {
             let arg = state.pop1();
-            let val = builder.ins().clz(arg);
-            state.push1(builder.ins().sextend(I32, val));
+            state.push1(builder.ins().clz(arg));
         }
-        Operator::I64Clz => {
+        Operator::I32Ctz | Operator::I64Ctz => {
             let arg = state.pop1();
-            let val = builder.ins().clz(arg);
-            state.push1(builder.ins().sextend(I64, val));
+            state.push1(builder.ins().ctz(arg));
         }
-        Operator::I32Ctz => {
-            let val = state.pop1();
-            let short_res = builder.ins().ctz(val);
-            state.push1(builder.ins().sextend(I32, short_res));
-        }
-        Operator::I64Ctz => {
-            let val = state.pop1();
-            let short_res = builder.ins().ctz(val);
-            state.push1(builder.ins().sextend(I64, short_res));
-        }
-        Operator::I32Popcnt => {
-            let arg = state.pop1();
-            let val = builder.ins().popcnt(arg);
-            state.push1(builder.ins().sextend(I32, val));
-        }
+        Operator::I32Popcnt |
         Operator::I64Popcnt => {
             let arg = state.pop1();
-            let val = builder.ins().popcnt(arg);
-            state.push1(builder.ins().sextend(I64, val));
+            state.push1(builder.ins().popcnt(arg));
         }
         Operator::I64ExtendSI32 => {
             let val = state.pop1();
@@ -606,6 +593,16 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
             let val = state.pop1();
             state.push1(builder.ins().fcvt_to_uint(I32, val));
         }
+        Operator::I64TruncSSatF64 |
+        Operator::I64TruncSSatF32 |
+        Operator::I32TruncSSatF64 |
+        Operator::I32TruncSSatF32 |
+        Operator::I64TruncUSatF64 |
+        Operator::I64TruncUSatF32 |
+        Operator::I32TruncUSatF64 |
+        Operator::I32TruncUSatF32 => {
+            panic!("proposed saturating conversion operators not yet supported");
+        }
         Operator::F32ReinterpretI32 => {
             let val = state.pop1();
             state.push1(builder.ins().bitcast(F32, val));
@@ -621,6 +618,36 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         Operator::I64ReinterpretF64 => {
             let val = state.pop1();
             state.push1(builder.ins().bitcast(I64, val));
+        }
+        Operator::I32Extend8S => {
+            let val = state.pop1();
+            state.push1(builder.ins().ireduce(I8, val));
+            let val = state.pop1();
+            state.push1(builder.ins().sextend(I32, val));
+        }
+        Operator::I32Extend16S => {
+            let val = state.pop1();
+            state.push1(builder.ins().ireduce(I16, val));
+            let val = state.pop1();
+            state.push1(builder.ins().sextend(I32, val));
+        }
+        Operator::I64Extend8S => {
+            let val = state.pop1();
+            state.push1(builder.ins().ireduce(I8, val));
+            let val = state.pop1();
+            state.push1(builder.ins().sextend(I64, val));
+        }
+        Operator::I64Extend16S => {
+            let val = state.pop1();
+            state.push1(builder.ins().ireduce(I16, val));
+            let val = state.pop1();
+            state.push1(builder.ins().sextend(I64, val));
+        }
+        Operator::I64Extend32S => {
+            let val = state.pop1();
+            state.push1(builder.ins().ireduce(I32, val));
+            let val = state.pop1();
+            state.push1(builder.ins().sextend(I64, val));
         }
         /****************************** Binary Operators ************************************/
         Operator::I32Add | Operator::I64Add => {
@@ -722,183 +749,193 @@ pub fn translate_operator<FE: FuncEnvironment + ?Sized>(
         }
         /**************************** Comparison Operators **********************************/
         Operator::I32LtS | Operator::I64LtS => {
-            let (arg1, arg2) = state.pop2();
-            let val = builder.ins().icmp(IntCC::SignedLessThan, arg1, arg2);
-            state.push1(builder.ins().bint(I32, val));
+            translate_icmp(IntCC::SignedLessThan, builder, state)
         }
         Operator::I32LtU | Operator::I64LtU => {
-            let (arg1, arg2) = state.pop2();
-            let val = builder.ins().icmp(IntCC::UnsignedLessThan, arg1, arg2);
-            state.push1(builder.ins().bint(I32, val));
+            translate_icmp(IntCC::UnsignedLessThan, builder, state)
         }
         Operator::I32LeS | Operator::I64LeS => {
-            let (arg1, arg2) = state.pop2();
-            let val = builder.ins().icmp(IntCC::SignedLessThanOrEqual, arg1, arg2);
-            state.push1(builder.ins().bint(I32, val));
+            translate_icmp(IntCC::SignedLessThanOrEqual, builder, state)
         }
         Operator::I32LeU | Operator::I64LeU => {
-            let (arg1, arg2) = state.pop2();
-            let val = builder.ins().icmp(
-                IntCC::UnsignedLessThanOrEqual,
-                arg1,
-                arg2,
-            );
-            state.push1(builder.ins().bint(I32, val));
+            translate_icmp(IntCC::UnsignedLessThanOrEqual, builder, state)
         }
         Operator::I32GtS | Operator::I64GtS => {
-            let (arg1, arg2) = state.pop2();
-            let val = builder.ins().icmp(IntCC::SignedGreaterThan, arg1, arg2);
-            state.push1(builder.ins().bint(I32, val));
+            translate_icmp(IntCC::SignedGreaterThan, builder, state)
         }
         Operator::I32GtU | Operator::I64GtU => {
-            let (arg1, arg2) = state.pop2();
-            let val = builder.ins().icmp(IntCC::UnsignedGreaterThan, arg1, arg2);
-            state.push1(builder.ins().bint(I32, val));
+            translate_icmp(IntCC::UnsignedGreaterThan, builder, state)
         }
         Operator::I32GeS | Operator::I64GeS => {
-            let (arg1, arg2) = state.pop2();
-            let val = builder.ins().icmp(
-                IntCC::SignedGreaterThanOrEqual,
-                arg1,
-                arg2,
-            );
-            state.push1(builder.ins().bint(I32, val));
+            translate_icmp(IntCC::SignedGreaterThanOrEqual, builder, state)
         }
         Operator::I32GeU | Operator::I64GeU => {
-            let (arg1, arg2) = state.pop2();
-            let val = builder.ins().icmp(
-                IntCC::UnsignedGreaterThanOrEqual,
-                arg1,
-                arg2,
-            );
-            state.push1(builder.ins().bint(I32, val));
+            translate_icmp(IntCC::UnsignedGreaterThanOrEqual, builder, state)
         }
         Operator::I32Eqz | Operator::I64Eqz => {
             let arg = state.pop1();
             let val = builder.ins().icmp_imm(IntCC::Equal, arg, 0);
             state.push1(builder.ins().bint(I32, val));
         }
-        Operator::I32Eq | Operator::I64Eq => {
-            let (arg1, arg2) = state.pop2();
-            let val = builder.ins().icmp(IntCC::Equal, arg1, arg2);
-            state.push1(builder.ins().bint(I32, val));
-        }
-        Operator::F32Eq | Operator::F64Eq => {
-            let (arg1, arg2) = state.pop2();
-            let val = builder.ins().fcmp(FloatCC::Equal, arg1, arg2);
-            state.push1(builder.ins().bint(I32, val));
-        }
-        Operator::I32Ne | Operator::I64Ne => {
-            let (arg1, arg2) = state.pop2();
-            let val = builder.ins().icmp(IntCC::NotEqual, arg1, arg2);
-            state.push1(builder.ins().bint(I32, val));
-        }
-        Operator::F32Ne | Operator::F64Ne => {
-            let (arg1, arg2) = state.pop2();
-            let val = builder.ins().fcmp(FloatCC::NotEqual, arg1, arg2);
-            state.push1(builder.ins().bint(I32, val));
-        }
-        Operator::F32Gt | Operator::F64Gt => {
-            let (arg1, arg2) = state.pop2();
-            let val = builder.ins().fcmp(FloatCC::GreaterThan, arg1, arg2);
-            state.push1(builder.ins().bint(I32, val));
-        }
+        Operator::I32Eq | Operator::I64Eq => translate_icmp(IntCC::Equal, builder, state),
+        Operator::F32Eq | Operator::F64Eq => translate_fcmp(FloatCC::Equal, builder, state),
+        Operator::I32Ne | Operator::I64Ne => translate_icmp(IntCC::NotEqual, builder, state),
+        Operator::F32Ne | Operator::F64Ne => translate_fcmp(FloatCC::NotEqual, builder, state),
+        Operator::F32Gt | Operator::F64Gt => translate_fcmp(FloatCC::GreaterThan, builder, state),
         Operator::F32Ge | Operator::F64Ge => {
-            let (arg1, arg2) = state.pop2();
-            let val = builder.ins().fcmp(FloatCC::GreaterThanOrEqual, arg1, arg2);
-            state.push1(builder.ins().bint(I32, val));
+            translate_fcmp(FloatCC::GreaterThanOrEqual, builder, state)
         }
-        Operator::F32Lt | Operator::F64Lt => {
-            let (arg1, arg2) = state.pop2();
-            let val = builder.ins().fcmp(FloatCC::LessThan, arg1, arg2);
-            state.push1(builder.ins().bint(I32, val));
-        }
+        Operator::F32Lt | Operator::F64Lt => translate_fcmp(FloatCC::LessThan, builder, state),
         Operator::F32Le | Operator::F64Le => {
-            let (arg1, arg2) = state.pop2();
-            let val = builder.ins().fcmp(FloatCC::LessThanOrEqual, arg1, arg2);
-            state.push1(builder.ins().bint(I32, val));
+            translate_fcmp(FloatCC::LessThanOrEqual, builder, state)
+        }
+        Operator::Wake { .. } |
+        Operator::I32Wait { .. } |
+        Operator::I64Wait { .. } |
+        Operator::I32AtomicLoad { .. } |
+        Operator::I64AtomicLoad { .. } |
+        Operator::I32AtomicLoad8U { .. } |
+        Operator::I32AtomicLoad16U { .. } |
+        Operator::I64AtomicLoad8U { .. } |
+        Operator::I64AtomicLoad16U { .. } |
+        Operator::I64AtomicLoad32U { .. } |
+        Operator::I32AtomicStore { .. } |
+        Operator::I64AtomicStore { .. } |
+        Operator::I32AtomicStore8 { .. } |
+        Operator::I32AtomicStore16 { .. } |
+        Operator::I64AtomicStore8 { .. } |
+        Operator::I64AtomicStore16 { .. } |
+        Operator::I64AtomicStore32 { .. } |
+        Operator::I32AtomicRmwAdd { .. } |
+        Operator::I64AtomicRmwAdd { .. } |
+        Operator::I32AtomicRmw8UAdd { .. } |
+        Operator::I32AtomicRmw16UAdd { .. } |
+        Operator::I64AtomicRmw8UAdd { .. } |
+        Operator::I64AtomicRmw16UAdd { .. } |
+        Operator::I64AtomicRmw32UAdd { .. } |
+        Operator::I32AtomicRmwSub { .. } |
+        Operator::I64AtomicRmwSub { .. } |
+        Operator::I32AtomicRmw8USub { .. } |
+        Operator::I32AtomicRmw16USub { .. } |
+        Operator::I64AtomicRmw8USub { .. } |
+        Operator::I64AtomicRmw16USub { .. } |
+        Operator::I64AtomicRmw32USub { .. } |
+        Operator::I32AtomicRmwAnd { .. } |
+        Operator::I64AtomicRmwAnd { .. } |
+        Operator::I32AtomicRmw8UAnd { .. } |
+        Operator::I32AtomicRmw16UAnd { .. } |
+        Operator::I64AtomicRmw8UAnd { .. } |
+        Operator::I64AtomicRmw16UAnd { .. } |
+        Operator::I64AtomicRmw32UAnd { .. } |
+        Operator::I32AtomicRmwOr { .. } |
+        Operator::I64AtomicRmwOr { .. } |
+        Operator::I32AtomicRmw8UOr { .. } |
+        Operator::I32AtomicRmw16UOr { .. } |
+        Operator::I64AtomicRmw8UOr { .. } |
+        Operator::I64AtomicRmw16UOr { .. } |
+        Operator::I64AtomicRmw32UOr { .. } |
+        Operator::I32AtomicRmwXor { .. } |
+        Operator::I64AtomicRmwXor { .. } |
+        Operator::I32AtomicRmw8UXor { .. } |
+        Operator::I32AtomicRmw16UXor { .. } |
+        Operator::I64AtomicRmw8UXor { .. } |
+        Operator::I64AtomicRmw16UXor { .. } |
+        Operator::I64AtomicRmw32UXor { .. } |
+        Operator::I32AtomicRmwXchg { .. } |
+        Operator::I64AtomicRmwXchg { .. } |
+        Operator::I32AtomicRmw8UXchg { .. } |
+        Operator::I32AtomicRmw16UXchg { .. } |
+        Operator::I64AtomicRmw8UXchg { .. } |
+        Operator::I64AtomicRmw16UXchg { .. } |
+        Operator::I64AtomicRmw32UXchg { .. } |
+        Operator::I32AtomicRmwCmpxchg { .. } |
+        Operator::I64AtomicRmwCmpxchg { .. } |
+        Operator::I32AtomicRmw8UCmpxchg { .. } |
+        Operator::I32AtomicRmw16UCmpxchg { .. } |
+        Operator::I64AtomicRmw8UCmpxchg { .. } |
+        Operator::I64AtomicRmw16UCmpxchg { .. } |
+        Operator::I64AtomicRmw32UCmpxchg { .. } => {
+            panic!("proposed thread operators not yet supported");
         }
     }
 }
 
+// Clippy warns us of some fields we are deliberately ignoring
+#[cfg_attr(feature = "cargo-clippy", allow(unneeded_field_pattern))]
 /// Deals with a Wasm instruction located in an unreachable portion of the code. Most of them
 /// are dropped but special ones like `End` or `Else` signal the potential end of the unreachable
 /// portion so the translation state muts be updated accordingly.
 fn translate_unreachable_operator(
     op: &Operator,
-    builder: &mut FunctionBuilder<Local>,
+    builder: &mut FunctionBuilder<Variable>,
     state: &mut TranslationState,
 ) {
-    let stack = &mut state.stack;
-    let control_stack = &mut state.control_stack;
-
-    // We don't translate because the code is unreachable
-    // Nevertheless we have to record a phantom stack for this code
-    // to know when the unreachable code ends
     match *op {
-        Operator::If { ty: _ } |
+        Operator::If { ty: _ } => {
+            // Push a placeholder control stack entry. The if isn't reachable,
+            // so we don't have any branches anywhere.
+            state.push_if(ir::Inst::reserved_value(), ir::Ebb::reserved_value(), 0);
+        }
         Operator::Loop { ty: _ } |
         Operator::Block { ty: _ } => {
-            state.phantom_unreachable_stack_depth += 1;
-        }
-        Operator::End => {
-            if state.phantom_unreachable_stack_depth > 0 {
-                state.phantom_unreachable_stack_depth -= 1;
-            } else {
-                // This End corresponds to a real control stack frame
-                // We switch to the destination block but we don't insert
-                // a jump instruction since the code is still unreachable
-                let frame = control_stack.pop().unwrap();
-
-                builder.switch_to_block(frame.following_code(), &[]);
-                builder.seal_block(frame.following_code());
-                match frame {
-                    // If it is a loop we also have to seal the body loop block
-                    ControlStackFrame::Loop { header, .. } => builder.seal_block(header),
-                    // If it is an if then the code after is reachable again
-                    ControlStackFrame::If { .. } => {
-                        state.real_unreachable_stack_depth = 1;
-                    }
-                    _ => {}
-                }
-                if frame.is_reachable() {
-                    state.real_unreachable_stack_depth = 1;
-                }
-                // Now we have to split off the stack the values not used
-                // by unreachable code that hasn't been translated
-                stack.truncate(frame.original_stack_size());
-                // And add the return values of the block but only if the next block is reachble
-                // (which corresponds to testing if the stack depth is 1)
-                if state.real_unreachable_stack_depth == 1 {
-                    stack.extend_from_slice(builder.ebb_args(frame.following_code()));
-                }
-                state.real_unreachable_stack_depth -= 1;
-            }
+            state.push_block(ir::Ebb::reserved_value(), 0);
         }
         Operator::Else => {
-            if state.phantom_unreachable_stack_depth > 0 {
-                // This is part of a phantom if-then-else, we do nothing
-            } else {
-                // Encountering an real else means that the code in the else
-                // clause is reachable again
-                let (branch_inst, original_stack_size) = match control_stack[control_stack.len() -
-                                                                                   1] {
-                    ControlStackFrame::If {
-                        branch_inst,
-                        original_stack_size,
-                        ..
-                    } => (branch_inst, original_stack_size),
-                    _ => panic!("should not happen"),
-                };
-                // We change the target of the branch instruction
-                let else_ebb = builder.create_ebb();
-                builder.change_jump_destination(branch_inst, else_ebb);
-                builder.seal_block(else_ebb);
-                builder.switch_to_block(else_ebb, &[]);
-                // Now we have to split off the stack the values not used
-                // by unreachable code that hasn't been translated
-                stack.truncate(original_stack_size);
-                state.real_unreachable_stack_depth = 0;
+            let i = state.control_stack.len() - 1;
+            if let ControlStackFrame::If {
+                branch_inst,
+                ref mut reachable_from_top,
+                ..
+            } = state.control_stack[i]
+            {
+                if *reachable_from_top {
+                    // We have a branch from the top of the if to the else.
+                    state.reachable = true;
+                    // And because there's an else, there can no longer be a
+                    // branch from the top directly to the end.
+                    *reachable_from_top = false;
+
+                    // We change the target of the branch instruction
+                    let else_ebb = builder.create_ebb();
+                    builder.change_jump_destination(branch_inst, else_ebb);
+                    builder.seal_block(else_ebb);
+                    builder.switch_to_block(else_ebb);
+                }
+            }
+        }
+        Operator::End => {
+            let stack = &mut state.stack;
+            let control_stack = &mut state.control_stack;
+            let frame = control_stack.pop().unwrap();
+
+            // Now we have to split off the stack the values not used
+            // by unreachable code that hasn't been translated
+            stack.truncate(frame.original_stack_size());
+
+            let reachable_anyway = match frame {
+                // If it is a loop we also have to seal the body loop block
+                ControlStackFrame::Loop { header, .. } => {
+                    builder.seal_block(header);
+                    // And loops can't have branches to the end.
+                    false
+                }
+                ControlStackFrame::If { reachable_from_top, .. } => {
+                    // A reachable if without an else has a branch from the top
+                    // directly to the bottom.
+                    reachable_from_top
+                }
+                // All other control constructs are already handled.
+                _ => false,
+            };
+
+            if frame.exit_is_branched_to() || reachable_anyway {
+                builder.switch_to_block(frame.following_code());
+                builder.seal_block(frame.following_code());
+
+                // And add the return values of the block but only if the next block is reachable
+                // (which corresponds to testing if the stack depth is 1)
+                stack.extend_from_slice(builder.ebb_params(frame.following_code()));
+                state.reachable = true;
             }
         }
         _ => {
@@ -907,18 +944,18 @@ fn translate_unreachable_operator(
     }
 }
 
-// Get the address+offset to use for a heap access.
+/// Get the address+offset to use for a heap access.
 fn get_heap_addr(
     heap: ir::Heap,
     addr32: ir::Value,
     offset: u32,
-    addr_ty: ir::Type,
-    builder: &mut FunctionBuilder<Local>,
+    addr_ty: Type,
+    builder: &mut FunctionBuilder<Variable>,
 ) -> (ir::Value, i32) {
     use std::cmp::min;
 
     let guard_size: i64 = builder.func.heaps[heap].guard_size.into();
-    assert!(guard_size > 0, "Heap guard pages currently required");
+    debug_assert!(guard_size > 0, "Heap guard pages currently required");
 
     // Generate `heap_addr` instructions that are friendly to CSE by checking offsets that are
     // multiples of the guard size. Add one to make sure that we check the pointer itself is in
@@ -928,28 +965,28 @@ fn get_heap_addr(
     // even if the access goes beyond the guard pages. This is because the first byte pointed to is
     // inside the guard pages.
     let check_size = min(
-        u32::max_value() as i64,
-        1 + (offset as i64 / guard_size) * guard_size,
+        i64::from(u32::MAX),
+        1 + (i64::from(offset) / guard_size) * guard_size,
     ) as u32;
     let base = builder.ins().heap_addr(addr_ty, heap, addr32, check_size);
 
     // Native load/store instructions take a signed `Offset32` immediate, so adjust the base
     // pointer if necessary.
-    if offset > i32::max_value() as u32 {
+    if offset > i32::MAX as u32 {
         // Offset doesn't fit in the load/store instruction.
-        let adj = builder.ins().iadd_imm(base, i32::max_value() as i64 + 1);
-        (adj, (offset - (i32::max_value() as u32 + 1)) as i32)
+        let adj = builder.ins().iadd_imm(base, i64::from(i32::MAX) + 1);
+        (adj, (offset - (i32::MAX as u32 + 1)) as i32)
     } else {
         (base, offset as i32)
     }
 }
 
-// Translate a load instruction.
+/// Translate a load instruction.
 fn translate_load<FE: FuncEnvironment + ?Sized>(
     offset: u32,
     opcode: ir::Opcode,
-    result_ty: ir::Type,
-    builder: &mut FunctionBuilder<Local>,
+    result_ty: Type,
+    builder: &mut FunctionBuilder<Variable>,
     state: &mut TranslationState,
     environ: &mut FE,
 ) {
@@ -957,6 +994,9 @@ fn translate_load<FE: FuncEnvironment + ?Sized>(
     // We don't yet support multiple linear memories.
     let heap = state.get_heap(builder.func, 0, environ);
     let (base, offset) = get_heap_addr(heap, addr32, offset, environ.native_pointer(), builder);
+    // Note that we don't set `is_aligned` here, even if the load instruction's
+    // alignment immediate says it's aligned, because WebAssembly's immediate
+    // field is just a hint, while Cretonne's aligned flag needs a guarantee.
     let flags = MemFlags::new();
     let (load, dfg) = builder.ins().Load(
         opcode,
@@ -968,11 +1008,11 @@ fn translate_load<FE: FuncEnvironment + ?Sized>(
     state.push1(dfg.first_result(load));
 }
 
-// Translate a store instruction.
+/// Translate a store instruction.
 fn translate_store<FE: FuncEnvironment + ?Sized>(
     offset: u32,
     opcode: ir::Opcode,
-    builder: &mut FunctionBuilder<Local>,
+    builder: &mut FunctionBuilder<Variable>,
     state: &mut TranslationState,
     environ: &mut FE,
 ) {
@@ -982,6 +1022,7 @@ fn translate_store<FE: FuncEnvironment + ?Sized>(
     // We don't yet support multiple linear memories.
     let heap = state.get_heap(builder.func, 0, environ);
     let (base, offset) = get_heap_addr(heap, addr32, offset, environ.native_pointer(), builder);
+    // See the comments in `translate_load` about the flags.
     let flags = MemFlags::new();
     builder.ins().Store(
         opcode,
@@ -991,4 +1032,55 @@ fn translate_store<FE: FuncEnvironment + ?Sized>(
         val,
         base,
     );
+}
+
+fn translate_icmp(
+    cc: IntCC,
+    builder: &mut FunctionBuilder<Variable>,
+    state: &mut TranslationState,
+) {
+    let (arg0, arg1) = state.pop2();
+    let val = builder.ins().icmp(cc, arg0, arg1);
+    state.push1(builder.ins().bint(I32, val));
+}
+
+fn translate_fcmp(
+    cc: FloatCC,
+    builder: &mut FunctionBuilder<Variable>,
+    state: &mut TranslationState,
+) {
+    let (arg0, arg1) = state.pop2();
+    let val = builder.ins().fcmp(cc, arg0, arg1);
+    state.push1(builder.ins().bint(I32, val));
+}
+
+fn translate_br_if(
+    relative_depth: u32,
+    builder: &mut FunctionBuilder<Variable>,
+    state: &mut TranslationState,
+) {
+    let val = state.pop1();
+    let (br_destination, inputs) = translate_br_if_args(relative_depth, state);
+    builder.ins().brnz(val, br_destination, inputs);
+}
+
+fn translate_br_if_args(
+    relative_depth: u32,
+    state: &mut TranslationState,
+) -> (ir::Ebb, &[ir::Value]) {
+    let i = state.control_stack.len() - 1 - (relative_depth as usize);
+    let (return_count, br_destination) = {
+        let frame = &mut state.control_stack[i];
+        // The values returned by the branch are still available for the reachable
+        // code that comes after it
+        frame.set_branched_to_exit();
+        let return_count = if frame.is_loop() {
+            0
+        } else {
+            frame.num_return_values()
+        };
+        (return_count, frame.br_destination())
+    };
+    let inputs = state.peekn(return_count);
+    (br_destination, inputs)
 }

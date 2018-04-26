@@ -9,7 +9,7 @@
 //!
 //! The options are either a single identifier flag, or setting values like `identifier=value`.
 //!
-//! The parser does not understand the test commands or which options are alid. It simply parses
+//! The parser does not understand the test commands or which options are valid. It simply parses
 //! the general format into a `TestCommand` data structure.
 
 use std::fmt::{self, Display, Formatter};
@@ -54,7 +54,7 @@ impl<'a> Display for TestCommand<'a> {
         for opt in &self.options {
             write!(f, " {}", opt)?;
         }
-        writeln!(f, "")
+        writeln!(f)
     }
 }
 

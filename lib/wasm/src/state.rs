@@ -3,16 +3,17 @@
 //! The `TranslationState` struct defined in this module is used to keep track of the WebAssembly
 //! value and control stacks during the translation of a single function.
 
-use cretonne::ir::{self, Ebb, Inst, Type, Value};
-use runtime::{FuncEnvironment, GlobalValue};
+use cretonne_codegen::ir::{self, Ebb, Inst, Value};
+use environ::{FuncEnvironment, GlobalValue};
 use std::collections::HashMap;
-use translation_utils::{GlobalIndex, MemoryIndex, SignatureIndex, FunctionIndex};
+use std::vec::Vec;
+use translation_utils::{FunctionIndex, GlobalIndex, MemoryIndex, SignatureIndex};
 
 /// A control stack frame can be an `if`, a `block` or a `loop`, each one having the following
 /// fields:
 ///
 /// - `destination`: reference to the `Ebb` that will hold the code after the control block;
-/// - `return_values`: types of the values returned by the control block;
+/// - `num_return_values`: number of values returned by the control block;
 /// - `original_stack_size`: size of the value stack at the beginning of the control block.
 ///
 /// Moreover, the `if` frame has the `branch_inst` field that points to the `brz` instruction
@@ -23,32 +24,32 @@ pub enum ControlStackFrame {
     If {
         destination: Ebb,
         branch_inst: Inst,
-        return_values: Vec<Type>,
+        num_return_values: usize,
         original_stack_size: usize,
-        reachable: bool,
+        exit_is_branched_to: bool,
+        reachable_from_top: bool,
     },
     Block {
         destination: Ebb,
-        return_values: Vec<Type>,
+        num_return_values: usize,
         original_stack_size: usize,
-        reachable: bool,
+        exit_is_branched_to: bool,
     },
     Loop {
         destination: Ebb,
         header: Ebb,
-        return_values: Vec<Type>,
+        num_return_values: usize,
         original_stack_size: usize,
-        reachable: bool,
     },
 }
 
 /// Helper methods for the control stack objects.
 impl ControlStackFrame {
-    pub fn return_values(&self) -> &[Type] {
+    pub fn num_return_values(&self) -> usize {
         match *self {
-            ControlStackFrame::If { ref return_values, .. } |
-            ControlStackFrame::Block { ref return_values, .. } |
-            ControlStackFrame::Loop { ref return_values, .. } => &return_values,
+            ControlStackFrame::If { num_return_values, .. } |
+            ControlStackFrame::Block { num_return_values, .. } |
+            ControlStackFrame::Loop { num_return_values, .. } => num_return_values,
         }
     }
     pub fn following_code(&self) -> Ebb {
@@ -80,19 +81,21 @@ impl ControlStackFrame {
         }
     }
 
-    pub fn is_reachable(&self) -> bool {
+    pub fn exit_is_branched_to(&self) -> bool {
         match *self {
-            ControlStackFrame::If { reachable, .. } |
-            ControlStackFrame::Block { reachable, .. } |
-            ControlStackFrame::Loop { reachable, .. } => reachable,
+            ControlStackFrame::If { exit_is_branched_to, .. } |
+            ControlStackFrame::Block { exit_is_branched_to, .. } => exit_is_branched_to,
+            ControlStackFrame::Loop { .. } => false,
         }
     }
 
-    pub fn set_reachable(&mut self) {
+    pub fn set_branched_to_exit(&mut self) {
         match *self {
-            ControlStackFrame::If { ref mut reachable, .. } |
-            ControlStackFrame::Block { ref mut reachable, .. } |
-            ControlStackFrame::Loop { ref mut reachable, .. } => *reachable = true,
+            ControlStackFrame::If { ref mut exit_is_branched_to, .. } |
+            ControlStackFrame::Block { ref mut exit_is_branched_to, .. } => {
+                *exit_is_branched_to = true
+            }
+            ControlStackFrame::Loop { .. } => {}
         }
     }
 }
@@ -105,8 +108,7 @@ impl ControlStackFrame {
 pub struct TranslationState {
     pub stack: Vec<Value>,
     pub control_stack: Vec<ControlStackFrame>,
-    pub phantom_unreachable_stack_depth: usize,
-    pub real_unreachable_stack_depth: usize,
+    pub reachable: bool,
 
     // Map of global variables that have already been created by `FuncEnvironment::make_global`.
     globals: HashMap<GlobalIndex, GlobalValue>,
@@ -126,12 +128,11 @@ pub struct TranslationState {
 }
 
 impl TranslationState {
-    pub fn new() -> TranslationState {
-        TranslationState {
+    pub fn new() -> Self {
+        Self {
             stack: Vec::new(),
             control_stack: Vec::new(),
-            phantom_unreachable_stack_depth: 0,
-            real_unreachable_stack_depth: 0,
+            reachable: true,
             globals: HashMap::new(),
             heaps: HashMap::new(),
             signatures: HashMap::new(),
@@ -140,10 +141,9 @@ impl TranslationState {
     }
 
     fn clear(&mut self) {
-        self.stack.clear();
-        self.control_stack.clear();
-        self.phantom_unreachable_stack_depth = 0;
-        self.real_unreachable_stack_depth = 0;
+        debug_assert!(self.stack.is_empty());
+        debug_assert!(self.control_stack.is_empty());
+        self.reachable = true;
         self.globals.clear();
         self.heaps.clear();
         self.signatures.clear();
@@ -158,11 +158,10 @@ impl TranslationState {
         self.clear();
         self.push_block(
             exit_block,
-            sig.return_types
+            sig.returns
                 .iter()
                 .filter(|arg| arg.purpose == ir::ArgumentPurpose::Normal)
-                .map(|argty| argty.value_type)
-                .collect(),
+                .count(),
         );
     }
 
@@ -215,45 +214,35 @@ impl TranslationState {
     }
 
     // Push a block on the control stack.
-    pub fn push_block(&mut self, following_code: Ebb, result_types: Vec<Type>) {
+    pub fn push_block(&mut self, following_code: Ebb, num_result_types: usize) {
         self.control_stack.push(ControlStackFrame::Block {
             destination: following_code,
             original_stack_size: self.stack.len(),
-            return_values: result_types,
-            reachable: false,
+            num_return_values: num_result_types,
+            exit_is_branched_to: false,
         });
     }
 
     // Push a loop on the control stack.
-    pub fn push_loop(&mut self, header: Ebb, following_code: Ebb, result_types: Vec<Type>) {
+    pub fn push_loop(&mut self, header: Ebb, following_code: Ebb, num_result_types: usize) {
         self.control_stack.push(ControlStackFrame::Loop {
             header,
             destination: following_code,
             original_stack_size: self.stack.len(),
-            return_values: result_types,
-            reachable: false,
+            num_return_values: num_result_types,
         });
     }
 
     // Push an if on the control stack.
-    pub fn push_if(&mut self, branch_inst: Inst, following_code: Ebb, result_types: Vec<Type>) {
+    pub fn push_if(&mut self, branch_inst: Inst, following_code: Ebb, num_result_types: usize) {
         self.control_stack.push(ControlStackFrame::If {
             branch_inst,
             destination: following_code,
             original_stack_size: self.stack.len(),
-            return_values: result_types,
-            reachable: false,
+            num_return_values: num_result_types,
+            exit_is_branched_to: false,
+            reachable_from_top: self.reachable,
         });
-    }
-
-    /// Test if the translation state is currently in unreachable code.
-    pub fn in_unreachable_code(&self) -> bool {
-        if self.real_unreachable_stack_depth > 0 {
-            true
-        } else {
-            debug_assert_eq!(self.phantom_unreachable_stack_depth, 0, "in reachable code");
-            false
-        }
     }
 }
 
@@ -324,10 +313,10 @@ impl TranslationState {
     }
 }
 
-/// Count the number of normal arguments in a signature.
-/// Exclude special-purpose arguments that represent runtime stuff and not WebAssembly arguments.
+/// Count the number of normal parameters in a signature.
+/// Exclude special-purpose parameters that represent runtime stuff and not WebAssembly arguments.
 fn normal_args(sig: &ir::Signature) -> usize {
-    sig.argument_types
+    sig.params
         .iter()
         .filter(|arg| arg.purpose == ir::ArgumentPurpose::Normal)
         .count()

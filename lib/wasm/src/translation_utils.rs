@@ -1,7 +1,7 @@
-///! Helper functions and structures for the translation.
-use wasmparser;
-use cretonne;
+//! Helper functions and structures for the translation.
+use cretonne_codegen::ir;
 use std::u32;
+use wasmparser;
 
 /// Index of a function (imported or defined) inside the WebAssembly module.
 pub type FunctionIndex = usize;
@@ -14,20 +14,11 @@ pub type MemoryIndex = usize;
 /// Index of a signature (imported or defined) inside the WebAssembly module.
 pub type SignatureIndex = usize;
 
-/// WebAssembly import.
-#[derive(Debug, Clone, Copy)]
-pub enum Import {
-    Function { sig_index: u32 },
-    Memory(Memory),
-    Global(Global),
-    Table(Table),
-}
-
 /// WebAssembly global.
 #[derive(Debug, Clone, Copy)]
 pub struct Global {
     /// The type of the value stored in the global.
-    pub ty: cretonne::ir::Type,
+    pub ty: ir::Type,
     /// A flag indicating whether the value may change at runtime.
     pub mutability: bool,
     /// The source of the initial value.
@@ -65,7 +56,7 @@ pub struct Table {
 /// WebAssembly table element. Can be a function or a scalar type.
 #[derive(Debug, Clone, Copy)]
 pub enum TableElementType {
-    Val(cretonne::ir::Type),
+    Val(ir::Type),
     Func(),
 }
 
@@ -76,56 +67,39 @@ pub struct Memory {
     pub pages_count: usize,
     /// The maximum number of pages in the memory.
     pub maximum: Option<usize>,
-}
-
-/// Wrapper to a `get_local` and `set_local` index. They are WebAssembly's non-SSA variables.
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
-pub struct Local(pub u32);
-impl cretonne::entity::EntityRef for Local {
-    fn new(index: usize) -> Self {
-        debug_assert!(index < (u32::MAX as usize));
-        Local(index as u32)
-    }
-
-    fn index(self) -> usize {
-        self.0 as usize
-    }
-}
-impl Default for Local {
-    fn default() -> Self {
-        Local(u32::MAX)
-    }
+    /// Whether the memory may be shared between multiple threads.
+    pub shared: bool,
 }
 
 /// Helper function translating wasmparser types to Cretonne types when possible.
-pub fn type_to_type(ty: &wasmparser::Type) -> Result<cretonne::ir::Type, ()> {
+pub fn type_to_type(ty: &wasmparser::Type) -> Result<ir::Type, ()> {
     match *ty {
-        wasmparser::Type::I32 => Ok(cretonne::ir::types::I32),
-        wasmparser::Type::I64 => Ok(cretonne::ir::types::I64),
-        wasmparser::Type::F32 => Ok(cretonne::ir::types::F32),
-        wasmparser::Type::F64 => Ok(cretonne::ir::types::F64),
+        wasmparser::Type::I32 => Ok(ir::types::I32),
+        wasmparser::Type::I64 => Ok(ir::types::I64),
+        wasmparser::Type::F32 => Ok(ir::types::F32),
+        wasmparser::Type::F64 => Ok(ir::types::F64),
         _ => Err(()),
     }
 }
 
 /// Turns a `wasmparser` `f32` into a `Cretonne` one.
-pub fn f32_translation(x: wasmparser::Ieee32) -> cretonne::ir::immediates::Ieee32 {
-    cretonne::ir::immediates::Ieee32::with_bits(x.bits())
+pub fn f32_translation(x: wasmparser::Ieee32) -> ir::immediates::Ieee32 {
+    ir::immediates::Ieee32::with_bits(x.bits())
 }
 
 /// Turns a `wasmparser` `f64` into a `Cretonne` one.
-pub fn f64_translation(x: wasmparser::Ieee64) -> cretonne::ir::immediates::Ieee64 {
-    cretonne::ir::immediates::Ieee64::with_bits(x.bits())
+pub fn f64_translation(x: wasmparser::Ieee64) -> ir::immediates::Ieee64 {
+    ir::immediates::Ieee64::with_bits(x.bits())
 }
 
 /// Translate a `wasmparser` type into its `Cretonne` equivalent, when possible
-pub fn translate_type(ty: wasmparser::Type) -> Result<Vec<cretonne::ir::Type>, ()> {
+pub fn num_return_values(ty: wasmparser::Type) -> usize {
     match ty {
-        wasmparser::Type::EmptyBlockType => Ok(Vec::new()),
-        wasmparser::Type::I32 => Ok(vec![cretonne::ir::types::I32]),
-        wasmparser::Type::F32 => Ok(vec![cretonne::ir::types::F32]),
-        wasmparser::Type::I64 => Ok(vec![cretonne::ir::types::I64]),
-        wasmparser::Type::F64 => Ok(vec![cretonne::ir::types::F64]),
+        wasmparser::Type::EmptyBlockType => 0,
+        wasmparser::Type::I32 |
+        wasmparser::Type::F32 |
+        wasmparser::Type::I64 |
+        wasmparser::Type::F64 => 1,
         _ => panic!("unsupported return value type"),
     }
 }
