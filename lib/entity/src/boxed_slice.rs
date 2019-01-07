@@ -3,6 +3,8 @@
 use crate::iter::{Iter, IterMut};
 use crate::keys::Keys;
 use crate::EntityRef;
+#[cfg(feature = "rayon_traits")]
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator};
 use std::marker::PhantomData;
 use std::ops::{Index, IndexMut};
 use std::slice;
@@ -133,6 +135,20 @@ where
 
     fn into_iter(self) -> Self::IntoIter {
         IterMut::new(self.elems.iter_mut())
+    }
+}
+
+#[cfg(feature = "rayon_traits")]
+impl<'a, K, V> IntoParallelIterator for &'a BoxedSlice<K, V>
+where
+    K: EntityRef + Send,
+    V: Sync,
+{
+    type Item = (K, &'a V);
+    type Iter = crate::par_iter::ParIter<'a, K, V>;
+
+    fn into_par_iter(self) -> Self::Iter {
+        Self::Iter::new(self.elems.par_iter())
     }
 }
 

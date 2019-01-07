@@ -141,6 +141,8 @@ mod iter;
 mod keys;
 mod list;
 mod map;
+#[cfg(feature = "rayon_traits")]
+mod par_iter;
 mod primary;
 mod set;
 mod sparse;

@@ -11,9 +11,13 @@ readme = "README.md"
 keywords = ["entity", "set", "map"]
 edition = "2018"
 
+[dependencies]
+rayon = { version = "1.0.3", optional = true }
+
 [features]
 default = ["std"]
 std = []
+rayon_traits = ["rayon"]
 
 [badges]
 maintenance = { status = "experimental" }
