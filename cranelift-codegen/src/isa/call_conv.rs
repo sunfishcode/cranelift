@@ -31,6 +31,7 @@ impl CallConv {
             // uses System V.
             Ok(CallingConvention::SystemV) | Err(()) => CallConv::SystemV,
             Ok(CallingConvention::WindowsFastcall) => CallConv::WindowsFastcall,
+            Ok(CallingConvention::WasmBasicCAbi) => unimplemented!("Wasm basic C ABI"),
         }
     }
 
